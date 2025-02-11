@@ -387,10 +387,12 @@ treated_locs <- fread("./data/crime_free_housing/cfh_treated_sites.csv")
 
 df_analysis <- setDT(join(df_analysis, treated_locs, by = c("location"), type = "left"))
 df_analysis[, treated := ifelse(is.na(treated), F, T)]
-df_analysis[, post_treat := ifelse(year >= implementation_date & treated == T, T, F)]
+
+# Recode treatment status so augsynth runs correctly. 
+df_analysis[, post_treat := ifelse(year >= implementation_date & treated == T, 1, 0)]
 
 # For now, remove Bullhead as crime-free since I cannot find evidence it exists:
-df_analysis[location == "Bullhead City", `:=`(treated = F, post_treat = F)]
+df_analysis[location == "Bullhead City", `:=`(treated = F, post_treat = 0)]
 
 write.csv(df_analysis, "./data/processed/df_crime_analysis.csv", row.names = F)
 
