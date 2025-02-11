@@ -13,6 +13,9 @@ setwd("C:/Users/griswold/Documents/GitHub/cfh_az/")
 
 census_key <- "bdb4891f65609f274f701e92911b94365992028a"
 
+overwrite <- F
+plots     <- F
+
 ###############
 # Process ACS #
 ###############
@@ -113,36 +116,45 @@ extract_census <- function(y, geo = "place", us_state = "AZ"){
   
 }
 
-years <- 2009:2023
-census_vars <- setDT(ldply(years, extract_census))
+if (overwrite){
 
-# Adjust rent and income using CPI (2020 base year)
+  years <- 2009:2023
+  census_vars <- setDT(ldply(years, extract_census))
+  
+  # Adjust rent and income using CPI (2020 base year)
+  
+  # U.S. Bureau of Labor Statistics, Consumer Price Index for All Urban Consumers: All Items in U.S. City Average [CPIAUCSL], 
+  # retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/CPIAUCSL, February 7, 2025.
+  
+  # U.S. Bureau of Labor Statistics, Consumer Price Index for All Urban Consumers: Rent of Primary Residence in U.S. City Average [CUUR0000SEHA], 
+  # retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/CUUR0000SEHA, February 7, 2025.
+  
+  # Using Rent of Primary residence due to inclusion of owner's equivalent rent within Shelter CPI
+  
+  df_cpi_rent <- fread("./data/census/bls_cpi_urban_rent_average_non_seasonal.csv")
+  df_cpi_all  <- fread("./data/census/bls_cpi_urban_all_items_average_non_seasonal.csv")
+  
+  # Recalculate CPI so that base year is 2023
+  base_2023_rent <- df_cpi_rent[year == 2023, cpi_rent]
+  df_cpi_rent[, cpi_rent := cpi_rent/base_2023_rent]
+  
+  base_2023_all <- df_cpi_all[year == 2023, cpi_all]
+  df_cpi_all[, cpi_all := cpi_all/base_2023_all]
+  
+  census_vars <- join(census_vars, df_cpi_rent, by = "year", type = 'left')
+  census_vars <- join(census_vars, df_cpi_all, by = "year", type = 'left')
+  
+  census_vars[, median_rent_adj := median_rent*cpi_rent]
+  census_vars[, median_income_adj := median_income*cpi_all]
+  
+  # Clean up location names to better merge with treatment data
+  census_vars[, location := gsub(", Arizona", "", location)]
+  census_vars[, location := gsub(" CDP| town| city", "", location)]
 
-# U.S. Bureau of Labor Statistics, Consumer Price Index for All Urban Consumers: All Items in U.S. City Average [CPIAUCSL], 
-# retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/CPIAUCSL, February 7, 2025.
-
-# U.S. Bureau of Labor Statistics, Consumer Price Index for All Urban Consumers: Rent of Primary Residence in U.S. City Average [CUUR0000SEHA], 
-# retrieved from FRED, Federal Reserve Bank of St. Louis; https://fred.stlouisfed.org/series/CUUR0000SEHA, February 7, 2025.
-
-# Using Rent of Primary residence due to inclusion of owner's equivalent rent within Shelter CPI
-
-df_cpi_rent <- fread("./data/census/bls_cpi_urban_rent_average_non_seasonal.csv")
-df_cpi_all  <- fread("./data/census/bls_cpi_urban_all_items_average_non_seasonal.csv")
-
-# Recalculate CPI so that base year is 2023
-base_2023_rent <- df_cpi_rent[year == 2023, cpi_rent]
-df_cpi_rent[, cpi_rent := cpi_rent/base_2023_rent]
-
-base_2023_all <- df_cpi_all[year == 2023, cpi_all]
-df_cpi_all[, cpi_all := cpi_all/base_2023_all]
-
-census_vars <- join(census_vars, df_cpi_rent, by = "year", type = 'left')
-census_vars <- join(census_vars, df_cpi_all, by = "year", type = 'left')
-
-census_vars[, median_rent_adj := median_rent*cpi_rent]
-census_vars[, median_income_adj := median_income*cpi_all]
-
-write.csv(census_vars, "./data/census/acs_az_place_2009_2023.csv", row.names = F)
+  write.csv(census_vars, "./data/census/acs_az_place_2009_2023.csv", row.names = F)
+}else{
+  census_vars <- fread("./data/census/acs_az_place_2009_2023.csv")
+}
 
 ###############
 # Process UCR #
@@ -153,55 +165,61 @@ write.csv(census_vars, "./data/census/acs_az_place_2009_2023.csv", row.names = F
 #Kaplan, Jacob. Jacob Kaplan’s Concatenated Files: Uniform Crime Reporting Program Data: Offenses Known and Clearances by Arrest (Return A), 1960-2022. 
 #Ann Arbor, MI: Inter-university Consortium for Political and Social Research [distributor], 2023-10-26. https://doi.org/10.3886/E100707V20
 
-ucr <- readRDS("./data/uniform_crime_reporting/offenses_known_yearly_1960_2023.rds")
+if (overwrite){
 
-setDT(ucr)
-ucr <- ucr[state == "arizona" & year >= 2009]
-
-# UCR distinguishes between two broad categories of crime: those committed
-# against persons & those committed against property. Let's use these
-# as the primary outcome variables, with their suggested aggregation in the
-# IPCSR UCR documentation:
-
-keep_vars <- c("ori", "year", "state", "crosswalk_agency_name",
-               "number_of_months_missing", "geoid", 
-               names(ucr)[names(ucr) %like% "actual_"])
-
-# Reconstruct geoid from fips codes. Only hold onto the first six characters
-# for GEOID, which correspond to CDP (essentially, we're upscaling more
-# granular geographies to be at the CDP-level). Make sure to include
-# leading zeros so that fips place code is always six characters
-
-ucr[, fips_place_code := formatC(fips_place_code, width = 5,
-                                 format = "d", flag = "0")]
-
-ucr[, geoid := paste0(fips_state_code, fips_place_code)]
-ucr[, geoid := sub("^(\\d{6})", "\\1", geoid)]
-
-ucr <- ucr[, keep_vars, with = F]
-
-# Remove locations missing a geoid or agency_name
-ucr <- ucr[(!((geoid %like% "NA")|crosswalk_agency_name == ""))]
-
-# Melt data by crime_type, then calculate totals for each crime type by 
-# census place. 
-ucr <- melt(ucr, id.vars = c("ori", "year", "state", "number_of_months_missing",
-                             "geoid", "crosswalk_agency_name"), 
-            variable.name = "crime_type", value.name = "crime_count")
-
-# Only hold onto specific crime types
-ucr[, crime_type := gsub("actual_", "", crime_type)]
-
-# Collapse counts by year, CDP, crime-type. Also aggregate number of LEAs informing
-# counts, along with cumulative months missing:
-ucr[, number_of_reporting_agencies := .N, by = c("crime_type", "geoid", "year")]
-ucr[, number_of_months_missing := sum(.SD$number_of_months_missing, na.rm = T), by = c("crime_type", "geoid", "year")]
-
-ucr[, crime_count := sum(.SD$crime_count, na.rm = T), by = c("crime_type", "geoid", "year")]
-ucr <- setDT(unique(ucr[, .(geoid, year, crime_type, crime_count, 
-                            number_of_months_missing, number_of_reporting_agencies)]))
-
-write.csv(ucr, "./data/uniform_crime_reporting/offenses_known_az_2009_2023.csv", row.names = F)
+  ucr <- readRDS("./data/uniform_crime_reporting/offenses_known_yearly_1960_2023.rds")
+  
+  setDT(ucr)
+  ucr <- ucr[state == "arizona" & year >= 2009]
+  
+  # UCR distinguishes between two broad categories of crime: those committed
+  # against persons & those committed against property. Let's use these
+  # as the primary outcome variables, with their suggested aggregation in the
+  # IPCSR UCR documentation:
+  
+  keep_vars <- c("ori", "year", "state", "crosswalk_agency_name",
+                 "number_of_months_missing", "geoid", 
+                 names(ucr)[names(ucr) %like% "actual_"])
+  
+  # Reconstruct geoid from fips codes. Only hold onto the first six characters
+  # for GEOID, which correspond to CDP (essentially, we're upscaling more
+  # granular geographies to be at the CDP-level). Make sure to include
+  # leading zeros so that fips place code is always six characters
+  
+  ucr[, fips_place_code := formatC(fips_place_code, width = 5,
+                                   format = "d", flag = "0")]
+  
+  ucr[, geoid := paste0(fips_state_code, fips_place_code)]
+  ucr[, geoid := sub("^(\\d{6})", "\\1", geoid)]
+  
+  ucr <- ucr[, keep_vars, with = F]
+  
+  # Remove locations missing a geoid or agency_name
+  ucr <- ucr[(!((geoid %like% "NA")|crosswalk_agency_name == ""))]
+  
+  # Melt data by crime_type, then calculate totals for each crime type by 
+  # census place. 
+  ucr <- melt(ucr, id.vars = c("ori", "year", "state", "number_of_months_missing",
+                               "geoid", "crosswalk_agency_name"), 
+              variable.name = "crime_type", value.name = "crime_count")
+  
+  # Only hold onto specific crime types
+  ucr[, crime_type := gsub("actual_", "", crime_type)]
+  
+  # Collapse counts by year, CDP, crime-type. Also aggregate number of LEAs informing
+  # counts, along with cumulative months missing:
+  ucr[, number_of_reporting_agencies := .N, by = c("crime_type", "geoid", "year")]
+  ucr[, number_of_months_missing := sum(.SD$number_of_months_missing, na.rm = T), by = c("crime_type", "geoid", "year")]
+  
+  ucr[, crime_count := sum(.SD$crime_count, na.rm = T), by = c("crime_type", "geoid", "year")]
+  ucr <- setDT(unique(ucr[, .(geoid, year, crime_type, crime_count, 
+                              number_of_months_missing, number_of_reporting_agencies)]))
+  
+  write.csv(ucr, "./data/uniform_crime_reporting/offenses_known_az_2009_2023.csv", row.names = F)
+  
+}else{
+  ucr <- fread("./data/uniform_crime_reporting/offenses_known_az_2009_2023.csv")
+}
 
 ######################
 # Merge census & ucr #
@@ -212,12 +230,9 @@ pop_vars <- census_vars[, .(geoid, location, total_population, year)]
 
 ucr <- setDT(join(ucr, pop_vars, by = c("geoid", "year"), type = "left"))
 
+# Drop all-crimes variable and locations which are not one of the 91 AZ cities
 ucr <- ucr[crime_type != "all_crimes"]
-
-# Drop locations which do not belong to one of the 91 cities in AZ:
-ucr <- ucr[!is.na(location),]
-ucr[, location := gsub(", Arizona", "", location)]
-ucr[, location := gsub(" CDP| town| city", "", location)]
+ucr <- ucr[!is.na(location)]
 
 # Convert crime counts to rate per 1k
 ucr[, crime_rate_1k := (crime_count/total_population)*1000]
@@ -237,67 +252,162 @@ ucr[crime_subtype %like% c('ind'), crime_type := "index_total"]
 
 ucr <- ucr[!is.na(crime_type)]
 
-# Investigate data to determine if any cities should be outliered:
-crime_type_by_year <- function(type, city, dd){
-  
-  dd <- dd[location == city, ]
-  
-  if (type != "pop" & type != "missingness"){
-    dd <-  dd[crime_type == type,]
+# Investigate data to determine if any cities should be outliered in crime analysis
+if (plots){
+  crime_type_by_year <- function(type, city, dd){
+    
+    dd <- dd[location == city, ]
+    
+    if (type != "pop" & type != "missingness"){
+      dd <-  dd[crime_type == type,]
+    }
+    
+    if (type != "pop" & type != "missingness"){
+      
+      plot <- ggplot(dd, aes(x = year, y = crime_rate_1k, color = crime_subtype)) +
+        geom_line(linewidth = 1, alpha = 0.9) +
+        labs(title = paste0(type, " rates per 10k in ", city),
+             x = "Year",
+             y = "Rate per 10k") +
+        theme_bw() +
+        theme(strip.background = element_blank())
+      
+    }else if (type == "pop"){
+      
+      dd <- unique(dd[, .(year, total_population)])
+      
+      plot <- ggplot(dd, aes(x = year, y = total_population)) +
+        geom_line(linewidth = 1) +
+        labs(title = paste0("Population estimates in ", city),
+             x = "Year",
+             y = "Population") +
+        theme_bw() +
+        theme(strip.background = element_blank())
+      
+    }else{
+      
+      dd <- unique(dd[, .(year, number_of_months_missing, number_of_reporting_agencies)])
+      
+      plot <- ggplot(dd, aes(x = year, y = number_of_months_missing)) +
+        geom_col() +
+        labs(title = paste0("Number of months not reported across ", 
+                            unique(dd$number_of_reporting_agencies),
+                            " agencies"),
+             x = "Year",
+             y = "Number of months") +
+        theme_bw() +
+        theme(strip.background = element_blank())
+      
+    }
+    
+    return(plot)
+    
   }
   
-  if (type != "pop" & type != "missingness"){
-    
-    plot <- ggplot(dd, aes(x = year, y = crime_rate_1k, color = crime_subtype)) +
-              geom_line(linewidth = 1, alpha = 0.9) +
-              labs(title = paste0(type, " rates per 10k in ", city),
-                   x = "Year",
-                   y = "Rate per 10k") +
-              theme_bw() +
-              theme(strip.background = element_blank())
-    
-  }else if (type == "pop"){
-    
-    dd <- unique(dd[, .(year, total_population)])
-    
-    plot <- ggplot(dd, aes(x = year, y = total_population)) +
-              geom_line(linewidth = 1) +
-              labs(title = paste0("Population estimates in ", city),
-                   x = "Year",
-                   y = "Population") +
-              theme_bw() +
-              theme(strip.background = element_blank())
-    
-  }else{
-    
-    dd <- unique(dd[, .(year, number_of_months_missing, number_of_reporting_agencies)])
-    
-    plot <- ggplot(dd, aes(x = year, y = number_of_months_missing)) +
-              geom_col() +
-              labs(title = paste0("Number of months not reported across ", 
-                                  unique(dd$number_of_reporting_agencies),
-                                  " agencies"),
-                   x = "Year",
-                   y = "Number of months") +
-              theme_bw() +
-              theme(strip.background = element_blank())
-    
-  }
+  args <- expand.grid("type" = c(unique(ucr$crime_type), c("pop", "missingness")), 
+                      "city" = unique(ucr$location))
   
-  return(plot)
+  crimes_year <- mlply(args, crime_type_by_year, dd = ucr)
+  crimes_year <- marrangeGrob(crimes_year, nrow = 3, ncol = 2)
+  
+  ggsave("./figs/crimes_by_city_year.pdf", crimes_year, height = 21, width = 29.7, units = "cm")
   
 }
 
-args <- expand.grid("type" = c(unique(ucr$crime_type), c("pop", "missingness")), 
-                    "city" = unique(ucr$location))
-
-crimes_year <- mlply(args, crime_type_by_year, dd = ucr)
-crimes_year <- marrangeGrob(crimes_year, nrow = 3, ncol = 2)
-
-ggsave("./figs/crimes_by_city_year.pdf", crimes_year, height = 21, width = 29.7, units = "cm")
-
 # Investigating the plots, I'm noticing the following irregularities:
 
+# St. Johns did not report data before 2012
+# Benson did not report several years before 2016
+# Bisbee did not report 2014-2016
+# Douglas did not report 2013 - 2015
+# Huachuca did not report 2013 - 2016
+# Sierra Vista missing 2013
+# Tombstone missing 2012 - 2016
+# Sedona - One agency did not report data before 2016; time trends look reasonable otherwise. 2021 appears to be missing
+# Globe is missing 2012
+# Hayden is missing data before 2016
+# Winkelman is super small - outlier this!
+# Safford is missing data between 2010 - 2014
+# Thatcher has one agency missing data before 2016 - trends appear relatively reasonable (besides 2021)
+# Clifton has implausible trends - does not appear to be reporting data fter 2016
+# Outlier Duncan
+# Outlier Gila Bend - they do not report any crime!
+# Mesa is missing data from one agency before 2016 but otherwise looks reasonable
+# Peoria is missing data from two agencies before 2016 but otherwise looks reasonable
+# Tolleson is missing data in 2016
+# Outlier Youngtown
+# Outlier Guadalupe
+# Outlier Colorado City
+# Outlier Taylor
+# South Tucson is missing data in 2016 (and 2017)
+# Sells data looks implausible
+# Superior is missing data before 2016
+# Outlier Patagonia
+# San Luis is missing data before 2011
+# Wellton is missing data in 2012 - 2013
+# Parker is missing data from 1/3 agencies in 2013 - 2016
+# Quartzsite is missing data in 2012
 
+# Implausible large values:
+# Window Rock, San Carlos, and Sacaton are reporting extremely large crime rates
+# for their population size.
 
-# Based on the above, I will be outliering these locations from the crime analysis.
+# Based on the above, I will be outliering these locations from the crime analysis. This comprises
+# a total populatoin of 36k/5.6 million in AZ CDPs.
+
+outlier_locs <- c("Hayden", "Clifton", "Duncan", "Youngtown", "Guadalupe", "Colorado City", "Taylor", "Superior",
+                  "Sells", "Patagonia", "Tombstone", "Benson", "Sacaton", "San Carlos", "Window Rock")
+
+# Remove total categories and "simple" categories (reason for aggregating myself rather
+# than using index - assault totals exclude assaults with a gun)
+
+ucr <- ucr[!(crime_subtype %like% "assault_total"|crime_subtype %like% "burg_total"|crime_subtype %like% "robbery_total"|
+                       crime_subtype %like% "mtr_veh_theft_total")]
+
+ucr[, crime_rate_1k := sum(.SD$crime_rate_1k), by = c("geoid", "year", "crime_type")]
+
+ucr <- setDT(unique(ucr[, .(geoid, location, year, number_of_months_missing, number_of_reporting_agencies, crime_type, crime_rate_1k)]))
+
+ucr <- dcast(ucr, geoid + location + year + number_of_months_missing + number_of_reporting_agencies ~ crime_type,
+                 value.var = "crime_rate_1k")
+
+ucr <- ucr[, outlier := ifelse(location %in% outlier_locs, T, F)]
+
+# Add on census information and treatment data for final analysis dataset:
+df_analysis <- setDT(join(ucr, census_vars, by = c("geoid", "location", "year")))
+
+# We're missing one city which isn't reporting any information to UCR/NIBRS:
+# Queen Creek
+# so add on census statistics and outlier location for crime analysis
+
+df_analysis <- rbind(df_analysis, census_vars[location == "Queen Creek"], fill = T)
+df_analysis[location == "Queen Creek", outlier := T]
+
+treated_locs <- fread("./data/crime_free_housing/cfh_treated_sites.csv")
+
+df_analysis <- setDT(join(df_analysis, treated_locs, by = c("location"), type = "left"))
+df_analysis[, treated := ifelse(is.na(treated), F, T)]
+df_analysis[, post_treat := ifelse(year >= implementation_date & treated == T, T, F)]
+
+# For now, remove Bullhead as crime-free since I cannot find evidence it exists:
+df_analysis[location == "Bullhead City", `:=`(treated = F, post_treat = F)]
+
+write.csv(df_analysis, "./data/processed/df_crime_analysis.csv", row.names = F)
+
+if (plots){
+  
+  df_prepost <- df_analysis[, .(year, assault_total, burglary_total, index_total, treated)]
+  df_prepost <- melt(df_prepost, id.vars = c("year", "treated"), 
+                     variable.name = "crime_type", value.name = "crime_rate_1k")
+  
+  df_prepost <- df_prepost[!is.na(crime_rate_1k)]
+  df_prepost[, crime_rate_1k := mean(.SD$crime_rate_1k), by = c("crime_type", "treated", "year")]
+  
+  df_prepost <- unique(df_prepost)
+  
+  ggplot(df_prepost, aes(x = year, y = crime_rate_1k, color = treated)) +
+    geom_line() +
+    facet_wrap(~crime_type) +
+    theme_bw()
+  
+}
