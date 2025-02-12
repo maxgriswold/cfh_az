@@ -2,57 +2,336 @@
 # Max Griswold
 # 2/10/25
 
+rm(list = ls())
+
 library(augsynth)
 library(data.table)
 library(ggplot2)
 library(did)
+library(plyr)
+library(gridExtra)
+
+# Code options:
+remove_outliers   <- T
+run_placebo       <- T
+run_lambda_search <- T
 
 df <- fread("./data/processed/df_crime_analysis.csv")
 
-# Remove outlier locations, always-treated locations, and single pre-treatment locations
-
-df <- df[outlier == F,]
+# Remove  always-treated locations, and single pre-treatment locations
 df <- df[implementation_date > 2010|is.na(implementation_date),]
 
-mod_1 <- multisynth(index_total ~ post_treat, location, year, data = df)
-res_1 <- summary(mod_1)
+# Sensitivity test: Does removing outliers w/ implausible UCR data change
+# estimated results?
 
-mod_2 <- multisynth(burglary_total ~ post_treat, location, year, data = df)
-res_2 <- summary(mod_2)
+if (remove_outliers){
+  df <- df[outlier == F,]
+}
 
-mod_3 <- multisynth(assault_total ~ post_treat, location, year, data = df)
-res_3 <- summary(mod_3)
+# Set up model options
+outcome_vars <- c("index_total", "assault_total", "burglary_total")
+covs         <- c("pop_white", "pop_black", "pop_asian", "pop_native_american",
+                  "pop_latin_hispanic", "median_income_adj", "total_population")
 
-# Set separate synthetic controls for each cohort; see if results differ
+# There is data missing for a single row in the median_income variable.
+# within the city of Quartzsite. While I could use multiple imputation
+# (e.g., MICE) to impute this value, median income is relatively stable
+# during this time. So, I am putting a linearly interpolated value for this
+# missing row to ensure a complete time series across all units. I did not
+# find any meaningful difference in results when I commented this row of code out.
 
-mod_4 <- multisynth(index_total ~ post_treat, location, year, 
-                    data = df, time_cohort = TRUE)
-res_4 <- summary(mod_4)
+df[location == "Quartzsite" & year == 2021, median_income_adj := 16138.65]
 
-mod_5 <- multisynth(burglary_total ~ post_treat, location, year, 
-                    data = df, time_cohort = TRUE)
-res_5 <- summary(mod_5)
+# Wrapper code for multisynth
+run_multi <- function(out, dd, covars = NULL, l = 0){
+  
+  if (is.null(covars)){
+    spec <- formula(paste0(out, " ~ post_treat"))
+  }else{
+    spec <- formula(paste0(out, " ~ post_treat |", paste0(covars, collapse = " + ")))
+  }
+  
+  mod <- multisynth(form = spec, unit = location, time = year,
+                    lambda = l, data = dd)
+  
+  res <- summary(mod)
+  
+  return(res)
+  
+}
 
-mod_6 <- multisynth(assault_total ~ post_treat, location, year, 
-                    data = df, time_cohort = TRUE)
-res_6 <- summary(mod_6)
 
-# Add covariates; using same covariates as those in the RAND report.
 
-mod_7 <- multisynth(index_total ~ post_treat | pop_white + pop_black + pop_asian + pop_native_american + pop_latin_hispanic + median_income_adj, 
-                    location, year, 
-                    data = df, time_cohort = TRUE)
-res_7 <- summary(mod_7)
+# Models w/o covariates
+args <- data.frame("out" = outcome_vars)
+mods_1 <- mlply(args, run_multi, dd = df)
+names(mods_1) <- outcome_vars
 
-mod_8 <- multisynth(burglary_total ~ post_treat | pop_white + pop_black + pop_asian + pop_native_american + pop_latin_hispanic + median_income_adj, location, year, 
-                    data = df, time_cohort = TRUE)
-res_8 <- summary(mod_8)
+# Models w/ covariates
+args <- data.frame("out" = outcome_vars)
+mods_2 <- mlply(args, run_multi, covars = covs, dd = df)
+names(mods_2) <- outcome_vars
 
-mod_9 <- multisynth(assault_total ~ post_treat | pop_white + pop_black + pop_asian + pop_native_american + pop_latin_hispanic + median_income_adj, location, year, 
-                    data = df, time_cohort = TRUE)
-res_9 <- summary(mod_9)
+# Results appear to be relatively stable over initial set of results,
+# regardless of covariate inclusion. 
 
-# Does using callaway and sant'anna change anything? 
+# Based on these initial findings,let's try out a series of sensitivity tests. 
+# First, let's implement a placebo tests to determine
+# if the estimated effect changes substantially if a control groups had been "treated".
+
+# Then, see if model fit can be improved through reducing imbalance 
+# in pretreatment outcomes using two strategies: 
+
+# (1) residualizing covariates and outcome variables
+# (2) fitting the model across a range of lambda values (more/less regularization).
+
+# Strategies taken from:
+
+# Ben-Michael, E., Feller, A., & Rothstein, J. (2021). The Augmented Synthetic Control Method. 
+# Journal of the American Statistical Association, 116(536), 1789–1803. 
+# https://doi.org/10.1080/01621459.2021.1929245
+
+# Pickett, R. E., Hill, J., & Cowan, S. K. (2022). The Myths of Synthetic Control: Recommendations for Practice.
+# https://as.nyu.edu/content/dam/nyu-as/cashtransferlab/documents/RPJHSC_SyntheticControl_041122.pdf
+
+# Residualized strategy adapted from:
+# Doudchenko, N., & Imbens, G. W. (2016). Balancing, regression, difference-in-differences and synthetic control methods: A synthesis (No. w22791). 
+# National Bureau of Economic Research.
+
+################# 
+# Placebo tests #
+#################
+
+# For each control unit, set each unit to treated, then
+# re-estimate the model. Hold onto ATT and se, then plot the range of results.
+
+# Alternative tests to consider:
+# Placebo treatment_years: Set treatment to earlier for treated units
+# Placebo control w/ year: randomize implementation year and unit
+
+if (run_placebo){
+  
+  placebo_runs <- function(out, dd, covars = NULL){
+    
+    control_units <- unique(dd$location[dd$treated == F])
+    
+    placebo_res <- list()
+    
+    for (cu in control_units){
+      
+      dd_c <- copy(dd)
+      
+      # For this test, I'm setting the earliest year of implementation
+      # within treated units as the implementation year. I'm doing this
+      # as a "conservative" test since this leads to less possible
+      # balancing of the placebo.
+      
+      dd_c[location == cu, `:=`(treated = T, implementation_date = 2014,
+                                post_treat = c(rep(0, 5), rep(1, 10)))]
+      
+      model <- run_multi(out = out, dd_c, covars = covars)
+      effs <- model$att
+      
+      # Get average post-treatment effect w/ 95% UI:
+      res <- data.table(outcome = out,
+                        location = cu,
+                        covariates = ifelse(is.null(covars), F, T),
+                        mean_effect = effs[effs$Level=="Average" & is.na(effs$Time),]$Estimate,
+                        lower = effs[effs$Level=="Average" & is.na(effs$Time),]$lower_bound,
+                        upper = effs[effs$Level=="Average" & is.na(effs$Time),]$upper_bound)
+      
+      placebo_res[[cu]] <- res
+      
+    }
+    
+    # Add on baseline model results:
+    model <- run_multi(out = out, dd, covars = covars)
+    effs <- model$att
+    
+    res <- data.table(outcome = out,
+                      location = "baseline",
+                      covariates = ifelse(is.null(covars), F, T),
+                      mean_effect = effs[effs$Level=="Average" & is.na(effs$Time),]$Estimate,
+                      lower = effs[effs$Level=="Average" & is.na(effs$Time),]$lower_bound,
+                      upper = effs[effs$Level=="Average" & is.na(effs$Time),]$upper_bound)
+    
+    placebo_res[["baseline"]] <- res
+    
+    placebo_res <- rbindlist(placebo_res)
+    
+    return(placebo_res)
+    
+  }
+  
+  plot_placebo <- function(dd){
+    
+    baseline <- dd[location == "baseline"]
+    outcome  <- unique(dd$outcome)
+    
+    cov_name <- ifelse(unique(dd$covars) == T, ", with covariates", "")
+    plot_title <- paste0("Placebo Test: ", outcome, cov_name)
+    
+    dd <- dd[location != "baseline",]
+    
+    plot <- ggplot(dd, aes(y = location, x = mean_effect, xmin = lower, xmax = upper)) +
+              geom_linerange(alpha = 0.9) +
+              geom_point(size = 2) +
+              geom_vline(linetype = 2, xintercept = baseline$mean_effect, color = 'red') +
+              geom_vline(linetype = 2, xintercept = baseline$lower, color = 'red') +
+              geom_vline(linetype = 2, xintercept = baseline$upper, color = 'red') +
+              labs(x = "Estimated Average ATT",
+                   y = "Placebo Unit",
+                   title = plot_title)
+              theme_bw() 
+    
+    return(plot)
+    
+  }
+  
+  # Models w/o covariates
+  args <- data.frame("out" = outcome_vars)
+  placebo_1 <- mlply(args, placebo_runs, dd = df)
+  
+  # Models w/ covariates
+  args <- data.frame("out" = outcome_vars)
+  placebo_2 <- mlply(args, placebo_runs, covars = covs, dd = df)
+  
+  # Plot results for each model
+  all_placebos <- c(placebo_1, placebo_2)
+  plots <- lapply(all_placebos, plot_placebo)
+  
+  fig_title <- ifelse(remove_outliers, "placebo_tests_outliers_removed", "placebo_tests_full_data")
+  
+  ggsave(sprintf("./figs/model_results/%s.pdf", fig_title), 
+         plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL), 
+         height = 11.69, width = 8.27)
+  
+}
+
+# Placebo tests w/ and w/o outliers are really encouraging - none of the models
+# lead to radically different estimates across tests. Accordingly, moving on
+# to improving balance:
+
+#################
+# Lambda search #
+#################
+
+if (run_lambda_search){
+  
+  lambda_search <- function(out, dd, ls, covars = NULL){
+    
+    res <- list()
+    
+    if (is.null(covars)){
+      spec <- formula(paste0(out, " ~ post_treat"))
+    }else{
+      spec <- formula(paste0(out, " ~ post_treat |", paste0(covars, collapse = " + ")))
+    }
+    
+    for (l in ls){
+      
+      mod <- multisynth(spec, unit = location, time = year,
+                        data = dd, lambda = l)
+      
+      effs <- summary(mod)$att
+      imbalance <- mod$global_l2
+      
+      item_name <- paste(l)
+      res[[item_name]] <- data.table("outcome" = out, "covariates" = ifelse(is.null(covars), F, T),
+                                     "lambda" = l, "L2 Imbalance" = imbalance, 
+                                     "mean_effect" = effs[effs$Level=="Average" & is.na(effs$Time),]$Estimate,
+                                     "lower" = effs[effs$Level=="Average" & is.na(effs$Time),]$lower_bound,
+                                     "upper" = effs[effs$Level=="Average" & is.na(effs$Time),]$upper_bound)
+    }
+    
+    res <- rbindlist(res)
+    return(res)
+    
+  }
+  
+  lambda_plot <- function(dd){
+    
+    outcome  <- unique(dd$outcome)
+    
+    cov_name <- ifelse(unique(dd$covariates) == T, ", with covariates", "")
+    plot_title <- paste0("Lambda search: ", outcome, cov_name)
+    
+    plot <- ggplot(dd, aes(x = lambda, y = `L2 Imbalance`)) +
+              geom_point() +
+              labs(x = "Lambda", y = "L2 Imabalance",
+                   title = plot_title) +
+              theme_bw()
+              
+    return(plot)
+              
+  }
+  
+  lambda_effects <- function(dd){
+    
+    outcome  <- unique(dd$outcome)
+    
+    cov_name <- ifelse(unique(dd$covariates) == T, ", with covariates", "")
+    plot_title <- paste0("Lambda search: ", outcome, cov_name)
+    
+    dd[, lambda := as.factor(lambda)]
+    
+    plot <- ggplot(dd, aes(y = lambda, x = mean_effect, xmin = lower, xmax = upper)) +
+              geom_linerange(alpha = 0.9) +
+              geom_point(size = 2) +
+              labs(x = "Estimated Average ATT",
+                   y = "Lambda",
+                   title = plot_title)
+              theme_bw() 
+    
+    return(plot)
+    
+  }
+  
+  lambda_vals <- c(0, 0.1, 0.2, 0.5, 1, 2, seq(5, 45, 5), seq(50, 100, 10))
+  
+  # Models w/o covariates
+  args <- data.frame("out" = outcome_vars)
+  lambda_1 <- mlply(args, lambda_search, dd = df, ls = lambda_vals)
+  
+  # Models w/ covariates
+  args <- data.frame("out" = outcome_vars)
+  lambda_2 <- mlply(args, lambda_search, covars = covs, dd = df, ls = lambda_vals)
+  
+  # Plot results for each model
+  all_lambdas <- c(lambda_1, lambda_2)
+  plots <- lapply(all_lambdas, lambda_plot)
+  
+  fig_title <- ifelse(remove_outliers, "lambda_search_outliers_removed", "lambda_search_full_data")
+  
+  ggsave(sprintf("./figs/model_results/%s.pdf", fig_title), 
+         plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL), 
+         width = 11.69, height = 8.27)
+  
+  plots <- lapply(all_lambdas, lambda_effects)
+  fig_title <- ifelse(remove_outliers, "lambda_v_effects_outliers_removed", "lambda_v_effects_full_data")
+  
+  ggsave(sprintf("./figs/model_results/%s.pdf", fig_title), 
+         plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL), 
+         height = 11.69, width = 8.27)
+  
+}
+
+# Based on plots, unsurprisingly, lambda should be zero for models without covariates.
+# Estimated effects do not appear to differ substantially based on lambda value
+
+# with covariates, it looks like 
+
+# outliers removed:
+# index total -> 75
+# assault_total -> 80
+# burglary_total -> 90
+
+# full data:
+# index total -> 75
+# assault_total -> 80
+# burglary_total -> 90
+
+# Additional check: Does using DID (Callaway and Sant'anna) lead to substantially different estimates? 
 df[is.na(implementation_date), implementation_date := 0]
 df[, location := as.numeric(as.factor(location))]
 
@@ -68,3 +347,5 @@ csa_1 <- att_gt(yname = "index_total",
                 biters = 1000,
                 base_period	= "universal",
                 allow_unbalanced_panel = F)
+
+csa_att <- aggte(csa_1, type = 'dynamic', balance_e = 3)

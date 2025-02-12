@@ -349,14 +349,15 @@ if (plots){
 # Quartzsite is missing data in 2012
 
 # Implausible large values:
-# Window Rock, San Carlos, and Sacaton are reporting extremely large crime rates
+# Window Rock, San Carlos, White River, Peach Springs, and Sacaton are reporting extremely large crime rates
 # for their population size.
 
 # Based on the above, I will be outliering these locations from the crime analysis. This comprises
-# a total populatoin of 36k/5.6 million in AZ CDPs.
+# a total population of 36k/5.6 million in AZ CDPs.
 
 outlier_locs <- c("Hayden", "Clifton", "Duncan", "Youngtown", "Guadalupe", "Colorado City", "Taylor", "Superior",
-                  "Sells", "Patagonia", "Tombstone", "Benson", "Sacaton", "San Carlos", "Window Rock")
+                  "Sells", "Patagonia", "Tombstone", "Benson", "Sacaton", "San Carlos", "Window Rock", "Whiteriver",
+                  "Peach Springs", "Bisbee", "Gila Bend", "Safford", "South Tucson", "Winkelman")
 
 # Remove total categories and "simple" categories (reason for aggregating myself rather
 # than using index - assault totals exclude assaults with a gun)
