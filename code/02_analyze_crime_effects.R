@@ -15,6 +15,7 @@ library(gridExtra)
 remove_outliers   <- T
 run_placebo       <- T
 run_lambda_search <- T
+estimate_did      <- F
 
 df <- fread("./data/processed/df_crime_analysis.csv")
 
@@ -60,8 +61,6 @@ run_multi <- function(out, dd, covars = NULL, l = 0){
   
 }
 
-
-
 # Models w/o covariates
 args <- data.frame("out" = outcome_vars)
 mods_1 <- mlply(args, run_multi, dd = df)
@@ -80,12 +79,7 @@ names(mods_2) <- outcome_vars
 # if the estimated effect changes substantially if a control groups had been "treated".
 
 # Then, see if model fit can be improved through reducing imbalance 
-# in pretreatment outcomes using two strategies: 
-
-# (1) residualizing covariates and outcome variables
-# (2) fitting the model across a range of lambda values (more/less regularization).
-
-# Strategies taken from:
+# in pretreatment byfitting the model across a range of lambda values (more/less regularization).
 
 # Ben-Michael, E., Feller, A., & Rothstein, J. (2021). The Augmented Synthetic Control Method. 
 # Journal of the American Statistical Association, 116(536), 1789–1803. 
@@ -93,10 +87,6 @@ names(mods_2) <- outcome_vars
 
 # Pickett, R. E., Hill, J., & Cowan, S. K. (2022). The Myths of Synthetic Control: Recommendations for Practice.
 # https://as.nyu.edu/content/dam/nyu-as/cashtransferlab/documents/RPJHSC_SyntheticControl_041122.pdf
-
-# Residualized strategy adapted from:
-# Doudchenko, N., & Imbens, G. W. (2016). Balancing, regression, difference-in-differences and synthetic control methods: A synthesis (No. w22791). 
-# National Bureau of Economic Research.
 
 ################# 
 # Placebo tests #
@@ -129,7 +119,9 @@ if (run_placebo){
       dd_c[location == cu, `:=`(treated = T, implementation_date = 2014,
                                 post_treat = c(rep(0, 5), rep(1, 10)))]
       
-      model <- run_multi(out = out, dd_c, covars = covars)
+      # Adding small lambda value to push past non-convexity
+      # Troublesome model: burglary_total w/ Wickenburg as placebo unit 
+      model <- run_multi(out = out, dd_c, covars = covars, l = 0.1)
       effs <- model$att
       
       # Get average post-treatment effect w/ 95% UI:
@@ -327,25 +319,82 @@ if (run_lambda_search){
 # burglary_total -> 90
 
 # full data:
-# index total -> 75
-# assault_total -> 80
-# burglary_total -> 90
+# index total -> 100
+# assault_total -> 100
+# burglary_total -> 1
+
+################
+# Final models #
+################
+
+df_att <- list()
+
+if (remove_outliers){
+  lambda_vals <- list("index_total" = 75, "assault_total" = 80, "burglary_total" = 100)
+}else{
+  lambda_vals <- list("index_total" = 100, "assault_total" = 100, "burglary_total" = 1)
+}
+
+for (o in outcome_vars){
+  
+  mod <- run_multi(o, df, covars = covs, l = lambda_vals[[o]])
+  res <- mod$att
+  
+  # Get average of crime rates in 2023 to calculate percentage effects
+  crime_obs <- df[year == 2023, mean(get(o)), ]
+  
+  df_res <- data.table("outcome" = o,
+                      "avg_obs" = crime_obs,
+                      "mean_effect" = res[res$Level=="Average" & is.na(res$Time),]$Estimate,
+                      "lower" = res[res$Level=="Average" & is.na(res$Time),]$lower_bound,
+                      "upper" = res[res$Level=="Average" & is.na(res$Time),]$upper_bound)
+  
+  df_res[, `:=`(percent_mean = (avg_obs + mean_effect)/avg_obs - 1,
+                percent_lower = (avg_obs + lower)/avg_obs - 1,
+                percent_upper = (avg_obs + upper)/avg_obs - 1)]
+  
+  df_att[[o]] <- df_res
+  
+}
+
+df_att <- rbindlist(df_att)
+
+df_att[, outcome_nice := c("Total Crime", "Assaults", "Burglaries")]
+
+p <- ggplot(df_att, aes(y = outcome_nice, x = percent_mean, xmin = percent_lower, xmax = percent_upper)) +
+        geom_point(size = 3) +
+        geom_linerange(linewidth = 1, alpha = 0.3) +
+        geom_vline(xintercept = 0, linetype = 2) +
+        scale_x_continuous(labels = scales::percent, limits = c(-1, 1.2)) +
+        labs(x = "Percent change in crime \nrate per 1,000 people in 2023",
+             y = "",
+             title = "Crime-Free Housing has no meaningful effect on crime") +
+        theme_bw() +
+        theme(axis.text = element_text(family = 'sans', size = 10),
+              plot.title = element_text(family = 'sans', size = 14),
+              axis.title = element_text(family = 'sans', size = 12))
+
+ggsave(plot = p, filename = "./figs/crime_results.pdf", height = 8.27/2, width = 8.27)
 
 # Additional check: Does using DID (Callaway and Sant'anna) lead to substantially different estimates? 
-df[is.na(implementation_date), implementation_date := 0]
-df[, location := as.numeric(as.factor(location))]
 
-csa_1 <- att_gt(yname = "index_total", 
-                tname = "year", 
-                idname = "location", 
-                gname = "implementation_date", 
-                control_group = "notyettreated", 
-                data = df, 
-                xformla = NULL,
-                est_method = "dr", 
-                bstrap = T,
-                biters = 1000,
-                base_period	= "universal",
-                allow_unbalanced_panel = F)
+if (estimate_did){
+  df[is.na(implementation_date), implementation_date := 0]
+  df[, location := as.numeric(as.factor(location))]
+  
+  csa_1 <- att_gt(yname = "index_total", 
+                  tname = "year", 
+                  idname = "location", 
+                  gname = "implementation_date", 
+                  control_group = "notyettreated", 
+                  data = df, 
+                  xformla = NULL,
+                  est_method = "dr", 
+                  bstrap = T,
+                  biters = 1000,
+                  base_period	= "universal",
+                  allow_unbalanced_panel = F)
+  
+  csa_att <- aggte(csa_1, type = 'dynamic', balance_e = 3)
+}
 
-csa_att <- aggte(csa_1, type = 'dynamic', balance_e = 3)
