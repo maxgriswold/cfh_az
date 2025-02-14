@@ -13,8 +13,8 @@ library(gridExtra)
 
 # Code options:
 remove_outliers   <- T
-run_placebo       <- T
-run_lambda_search <- T
+run_placebo       <- F
+run_lambda_search <- F
 estimate_did      <- F
 
 df <- fread("./data/processed/df_crime_analysis.csv")
@@ -368,7 +368,7 @@ p <- ggplot(df_att, aes(y = outcome_nice, x = percent_mean, xmin = percent_lower
         scale_x_continuous(labels = scales::percent, limits = c(-1, 1.2)) +
         labs(x = "Percent change in crime \nrate per 1,000 people in 2023",
              y = "",
-             title = "Crime-Free Housing has no meaningful effect on crime") +
+             title = "Crime-Free Housing has no meaningful effect on crime in Arizona") +
         theme_bw() +
         theme(axis.text = element_text(family = 'sans', size = 10),
               plot.title = element_text(family = 'sans', size = 14),
@@ -396,5 +396,6 @@ if (estimate_did){
                   allow_unbalanced_panel = F)
   
   csa_att <- aggte(csa_1, type = 'dynamic', balance_e = 3)
+  
 }
 

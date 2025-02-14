@@ -244,6 +244,7 @@ ucr[, crime_rate_1k := (crime_count/total_population)*1000]
 ucr[, crime_subtype := crime_type]
 ucr[, crime_type := NA]
 
+# Remove total categories:
 ucr[crime_subtype %like% c("burg"), crime_type := 'burglary_total']
 ucr[crime_subtype %like% c("robbery"), crime_type := 'robbery_total']
 ucr[crime_subtype %like% c("assault"), crime_type := 'assault_total']
