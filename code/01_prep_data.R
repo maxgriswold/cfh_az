@@ -8,6 +8,11 @@ library(data.table)
 library(plyr)
 library(dplyr)
 library(tidycensus)
+library(tidygeocoder)
+library(sf)
+
+sf::sf_use_s2(FALSE)
+options(tigris_use_cache = TRUE)
 
 setwd("C:/Users/griswold/Documents/GitHub/cfh_az/")
 
@@ -15,6 +20,7 @@ census_key <- "bdb4891f65609f274f701e92911b94365992028a"
 
 overwrite <- F
 plots     <- F
+geocode   <- T
 
 ###############
 # Process ACS #
@@ -415,3 +421,308 @@ if (plots){
     theme_bw()
   
 }
+
+############################
+# Process Eviction Filings #
+############################
+
+df_evict <- fread("./data/eviction_filings/maricopa_county/evictions_maricopa_county_2024.csv")
+
+df_evict <- df_evict[, c("File Date", "Case Number", "SubCategory", "Case Status",
+                         "Claim Amount", "Defendant1 Address", "Plaintiff Name"), with = F]
+
+setnames(df_evict, names(df_evict), c("date", "case_id", "category", "status", "rent_owed", "address", "plaintiff"))
+
+# Hold onto only adjudicated cases in 2024. Large number of cases are sealed (16k)
+# which indicates either the defendant won the case or both parties agreed to seal
+# the case.
+df_evict <- df_evict[status != "Sealed",]
+
+# Hold onto possession cases (this is the overwhelming number of cases in Maricopa county:
+# 65k/70k are possession. ~5k are rent-related)
+
+df_evict <- df_evict[category == "Poss Prop",]
+
+# Are cases uniquely identified by an ID?
+# dim(df_evict)[1] == length(unique(df_evict$case_id))
+
+batch_geocodes <- function(d, batches = 2e3, add = ""){
+  
+  #Create splitting column
+  d  <- d[, batch := ceiling(.I/batches)]
+  ds <- split(d, by = "batch", keep.by = F)
+  
+  processed <- llply(ds, code_coordinates, added_text = add)
+  processed <- rbindlist(processed)
+  
+  return(processed)
+  
+}
+
+# Iterative function which applies geocoders to addresses. For each address,
+# try a geocoder. If it doesn't work, try the next one.
+
+code_coordinates <- function(df, added_text = ""){
+  
+  #Geocoders are super temperamental. Given this, we'll need to process geocodes
+  #in batches. We'll split datasets into sets of 2k. For each batch, we'll try
+  #out a cascade of open-source geocoders, starting w/ Census, then arc-gis, 
+  #then finally open-street-maps. If all else fails, we can try Google at a later point (I have
+  #an API key but it's set up to bill a different PTN)
+  
+  #Lots of unit tests in this function; I was running into  issues
+  #from certain geocoders not producing new results. There's likely a better
+  #way to do the below; too much rewritten code!
+  
+  dd <- df %>%
+    geocode(address, method = "census") %>%
+    setDT() %>%
+    .[, method := "census"]
+  
+  #Add on additional text to address to create additional redundancies, which
+  #tends to improve reliability of geocodes
+  dd[, address := paste(address, added_text)]
+  
+  res <- dd[!is.na(lat)]
+  dd  <- dd[is.na(lat),]
+  
+  #Remove lat/long column for uncoded addresses since keeping this column
+  #in the dataset is creating issues for arcgis method:
+  dd <- dd[, `:=`(lat = NULL, long = NULL)]
+  
+  if (dim(dd)[1] >= 1){
+    dd <- dd %>%
+      geocode(address, method = "arcgis") %>%
+      setDT() %>%
+      .[, method := "arcgis"]
+    
+    if (dim(dd[!is.na(lat)])[1] >= 1){
+      res <-setDT(rbind(res, dd[!is.na(lat)]))
+    }
+    dd  <- dd[is.na(lat), ]
+    dd <- dd[, `:=`(lat = NULL, long = NULL)]
+  }
+  
+  if (dim(dd)[1] >= 1){
+    dd <- dd %>%
+      geocode(address, method = "osm") %>%
+      setDT() %>%
+      .[, method := "osm"]
+    
+    if (dim(dd[!is.na(lat)])[1] >= 1){
+      res <- setDT(rbind(res, dd[!is.na(lat)]))
+    }
+  }
+  
+  print(paste0("Could not code ", dim(dd)[1], " addresses."))
+  print(res)
+  return(res)
+  
+}
+
+# Also load CFH property locations within cities of Maricopa county.
+# Geocode these locations.
+
+if (geocode){
+  keep_cities <- c("avondale", "chandler", "mesa")
+  
+  property_loc_files <- "./data/crime_free_housing/property_locations/"
+  property_locs <- paste0(property_loc_files, list.files(property_loc_files))
+  property_locs <- property_locs[grepl(paste0(keep_cities, collapse = "|"), property_locs)]
+  
+  code_properties <- function(city){
+    
+    city_name <- gsub(paste0(property_loc_files, "|.csv"), "", city)
+    
+    dd <- fread(city)
+    
+    # Add on property name, if it exists, to help out geocoder:
+    if ("property_name" %in% names(dd)){
+      dd[, address := paste0(property_name, ", ", address) ]
+    }
+    
+    dd <- batch_geocodes(dd, add = paste0(", ", city_name, ", AZ"))
+    dd[, location := city_name]
+    
+    return(dd)
+    
+  }
+  
+  df_properties <- ldply(property_locs, code_properties)
+  write.csv(df_properties, "./data/crime_free_housing/cfh_property_locations.csv")
+  
+}else{
+  
+  df_properties <- fread("./data/crime_free_housing/cfh_property_locations.csv")
+  
+}
+
+
+if (geocode){
+  
+  df_evict <- batch_geocodes(df_evict)
+  
+  write.csv(df_evict, "./data/eviction_filings/evictions_maricopa_county_2024_geocoded.csv", row.names = F)
+  
+  # Convert eviction points into counts at block-group level:
+  df_evict <- geo_in_block(df_evict, tiger_block)
+  df_evict[, evict_count := .N, by = "block_geoid"]
+  df_evict <- unique(df_evict[, .(block_geoid, evict_count)])
+  
+  write.csv(df_evict, "./data/eviction_filings/evictions_maricopa_county_2024_block_groups.csv", row.names = F)
+  
+}else{
+  
+  df_evict <- fread("./data/eviction_filings/evictions_maricopa_county_2024_block_groups.csv")
+  
+}
+
+# Get TIGER Files for both census places and blocks. 
+# We'll use TIGER places to crop blocks into cities, then
+# merge on eviction filings and property locations, if they 
+# intersect a block.
+
+# Variable we're querying doesn't matter - we're doing this to get geometry
+# only.
+
+tiger_block <- get_acs(geography = "block group", year = 2023, variables = "B01003_001", 
+                       state = "AZ", geometry = T, key = census_key, survey = "acs5") %>%
+                        setDT %>%
+                        .[, .(GEOID, NAME, geometry)] %>%
+                        setnames(., c("NAME", "GEOID"), c("block_name", "block_geoid")) %>%
+                        .[, block_geoid := as.numeric(block_geoid)] %>%
+                        st_as_sf()
+
+tiger_place <- get_acs(geography = "place", year = 2023, variables = "B01003_001", 
+                       state = "AZ", geometry = T, key = census_key, survey = "acs5") %>%
+                        setDT %>%
+                        .[, .(GEOID, NAME, geometry)] %>%
+                        setnames(., c("NAME", "GEOID"), c("place_name", "place_geoid")) %>%
+                        .[, place_geoid := as.numeric(place_geoid)] %>%
+                        st_as_sf()
+
+# Hold onto TIGER places within study sites (e.g., within Maricopa county)
+
+tiger_place$location = tolower(gsub(" CDP| town| city|, Arizona", "", tiger_place$place_name))
+tiger_place <- tiger_place[tiger_place$location %in% keep_cities,]
+setorder(tiger_place, place_name)
+
+# Using TIGER shapefile, determine all blocks that touch a place polygon
+# Then, for each block, calculate the percentage of area within a census 
+# place. 
+
+block_in_place <- function(place, blocks){
+  
+  overlap               <- st_intersection(place, blocks)
+  overlap$area_overlap  <- as.numeric(st_area(overlap))
+  
+  # Intersections can occur at the boundary between two the city & neighboring
+  # city blocks. Drop these
+  overlap <- overlap[overlap$area_overlap > 0,]
+  
+  setDT(overlap)
+  overlap <- overlap[, .(block_geoid, area_overlap)]
+  
+  # Get original area of blocks and merge with intersected blocks
+  old_blocks <- tiger_block[tiger_block$block_geoid %in% overlap$block_geoid,]
+  old_blocks$area_original  <- as.numeric(st_area(old_blocks))
+  
+  setDT(old_blocks)
+  old_blocks <- old_blocks[, .(block_geoid, area_original, geometry)]
+  
+  overlap <- join(overlap, old_blocks, by = "block_geoid", type = "left")
+  overlap[, overlap_percent := area_overlap/area_original, ]
+  overlap[, overlap_80 := ifelse(overlap_percent >= 0.8, 1, 0)]
+  overlap[, overlap_50 := ifelse(overlap_percent >= 0.5, 1, 0)]
+  
+  return(overlap)
+  
+}
+
+# For a given spatial point, determine which block it belongs to.
+geo_in_block <- function(d, geo){
+  
+  d <- st_as_sf(d, coords = c("long", "lat"))
+  d <- st_set_crs(d, st_crs(tiger_block))
+  
+  d <- st_join(d, geo, join = st_within, left = T)
+  setDT(d)
+  
+  d[, block_geoid := as.numeric(block_geoid)]
+  d[, .(address, block_geoid)]
+  
+  return(d)
+  
+}
+
+# Below code looks a bit goofy but the idea here is to transform the single
+# sf collection of cities into a list where each item is now a sf corresponding
+# to a single row in the original collection. I am doing this so I can then
+# loop over the shapefile of each city to determine which census blocks are within
+# them.
+
+city_shape  <- lapply(seq_len(nrow(tiger_place)), function(i) tiger_place[i, , drop = F])
+city_blocks <- lapply(city_shape, block_in_place, blocks = tiger_block)
+
+df_census_blocks <- extract_census(2023, geo = "block group")
+df_census_blocks <- df_census_blocks[location %like% "Maricopa",]
+df_census_blocks[, block_geoid := as.numeric(geoid)]
+
+# Get all files in alignment and combine assorted information across files
+names(city_shape) <- keep_cities
+names(city_blocks) <- keep_cities
+
+sfd_analysis_prep <- function(city_name){
+  
+  dd <- city_blocks[[city_name]]
+  
+  # Add on census indicators, eviction information, and cfho property
+  # locations:
+  dd <- join(dd, df_census_blocks, by = "block_geoid", type = 'left')
+  dd <- join(dd, df_evict, by = "block_geoid", type = "left")
+  
+  dd_props <- df_properties[location == city_name,]
+  dd_props <- geo_in_block(dd_props, tiger_block)
+  dd_props[, cfh_num := .N, by = "block_geoid"]
+  dd_props <- unique(dd_props[, .(block_geoid, cfh_num)])
+  
+  dd <- join(dd, dd_props, by = "block_geoid", type = "left")
+  
+  # If blocks are missing eviction or cfh property counts, then
+  # we know they should be zero:
+  dd[is.na(evict_count), evict_count := 0]
+  dd[is.na(cfh_num), cfh_num := 0]
+  
+  dd[, cfh_any := ifelse(cfh_num > 0, 1, 0)]  
+  
+  # Do not include blocks without rental units as a comparators
+  dd <- dd[number_rental_units > 0,]
+  
+  dd[, location := city_name]
+  
+  dd <- dd[, .(location, block_geoid, evict_count, cfh_num, cfh_any, number_rental_units,
+               renter_household_total, total_population, median_income,
+               renter_white_alone, renter_black, renter_asian, renter_native_american, 
+               renter_hispanic_latin, percent_poverty_150, geometry)]
+  
+  dd <- st_as_sf(dd) %>%
+          st_transform(4326)
+  
+  sfd_save <- paste0("./data/processed/sfd/", city_name, "_prepped.geojson")
+  st_write(dd, sfd_save, append = F, delete_dsn = T, delete_layer = T)
+  
+  return(dd)
+  
+}
+
+shapefiles <- lapply(keep_cities, sfd_analysis_prep)
+
+# Sanity check - how do the shapes overlap?
+# mesa_city   <- city_shape[[3]]
+# mesa_blocks <- st_as_sf(city_blocks[[3]]) %>% st_set_crs(., st_crs(mesa_city))
+# mesa_props  <- st_as_sf(df_properties[df_properties$location == 'mesa',], coords = c("long", "lat")) %>% st_set_crs(., st_crs(mesa_city))
+# ggplot() + geom_sf(data = mesa_city, color = 'red', fill = "red", alpha = 0.3) +
+#            geom_sf(data = mesa_blocks, fill = "transparent") +
+#            geom_sf(data = mesa_props)
+
+# Looks correct to me.

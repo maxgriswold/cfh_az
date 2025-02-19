@@ -1,0 +1,5 @@
+*.xlsx
+*.pdf
+data/eviction_filings/maricopa_county/evictions_maricopa_county_2024.csv
+data/eviction_filings/evictions_maricopa_county_2024_geocoded.csv
+*.xlsx
