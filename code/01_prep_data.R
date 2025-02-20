@@ -20,7 +20,7 @@ census_key <- "bdb4891f65609f274f701e92911b94365992028a"
 
 overwrite <- F
 plots     <- F
-geocode   <- T
+geocode   <- F
 
 ###############
 # Process ACS #
@@ -524,6 +524,7 @@ code_coordinates <- function(df, added_text = ""){
 # Geocode these locations.
 
 if (geocode){
+  
   keep_cities <- c("avondale", "chandler", "mesa")
   
   property_loc_files <- "./data/crime_free_housing/property_locations/"
@@ -574,7 +575,7 @@ if (geocode){
 }else{
   
   df_evict <- fread("./data/eviction_filings/evictions_maricopa_county_2024_block_groups.csv")
-  
+  df_evict[, block_geoid := as.numeric(block_geoid)]
 }
 
 # Get TIGER Files for both census places and blocks. 
@@ -693,6 +694,9 @@ sfd_analysis_prep <- function(city_name){
   dd[is.na(evict_count), evict_count := 0]
   dd[is.na(cfh_num), cfh_num := 0]
   
+  dd[, evict_rate := 100*(evict_count/number_rental_units)]
+  dd[, median_income_10k := median_income/1e4]
+  
   dd[, cfh_any := ifelse(cfh_num > 0, 1, 0)]  
   
   # Do not include blocks without rental units as a comparators
@@ -700,8 +704,9 @@ sfd_analysis_prep <- function(city_name){
   
   dd[, location := city_name]
   
-  dd <- dd[, .(location, block_geoid, evict_count, cfh_num, cfh_any, number_rental_units,
-               renter_household_total, total_population, median_income,
+  dd <- dd[, .(location, block_geoid, evict_count, evict_rate,
+               cfh_num, cfh_any, number_rental_units,
+               renter_household_total, total_population, median_income_10k,
                renter_white_alone, renter_black, renter_asian, renter_native_american, 
                renter_hispanic_latin, percent_poverty_150, geometry)]
   

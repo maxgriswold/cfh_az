@@ -194,7 +194,7 @@ if (run_placebo){
   
   fig_title <- ifelse(remove_outliers, "placebo_tests_outliers_removed", "placebo_tests_full_data")
   
-  ggsave(sprintf("./figs/model_results/%s.pdf", fig_title), 
+  ggsave(sprintf("./figs/model_results/multisynth/%s.pdf", fig_title), 
          plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL), 
          height = 11.69, width = 8.27)
   
@@ -295,14 +295,14 @@ if (run_lambda_search){
   
   fig_title <- ifelse(remove_outliers, "lambda_search_outliers_removed", "lambda_search_full_data")
   
-  ggsave(sprintf("./figs/model_results/%s.pdf", fig_title), 
+  ggsave(sprintf("./figs/model_results/multisynth/%s.pdf", fig_title), 
          plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL), 
          width = 11.69, height = 8.27)
   
   plots <- lapply(all_lambdas, lambda_effects)
   fig_title <- ifelse(remove_outliers, "lambda_v_effects_outliers_removed", "lambda_v_effects_full_data")
   
-  ggsave(sprintf("./figs/model_results/%s.pdf", fig_title), 
+  ggsave(sprintf("./figs/model_results/multisynth/%s.pdf", fig_title), 
          plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL), 
          height = 11.69, width = 8.27)
   
@@ -374,7 +374,7 @@ p <- ggplot(df_att, aes(y = outcome_nice, x = percent_mean, xmin = percent_lower
               plot.title = element_text(family = 'sans', size = 14),
               axis.title = element_text(family = 'sans', size = 12))
 
-ggsave(plot = p, filename = "./figs/crime_results.pdf", height = 8.27/2, width = 8.27)
+ggsave(plot = p, filename = "./figs/estimated_cfh_effects_crime.pdf", height = 8.27/2, width = 8.27)
 
 # Additional check: Does using DID (Callaway and Sant'anna) lead to substantially different estimates? 
 

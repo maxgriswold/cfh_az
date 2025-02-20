@@ -69,6 +69,14 @@ construct_sfd <- function (spatial_df, tol = 0, dependent_var, independent_vars,
     bb      <- lapply(st_geometry(spatial_df), st_bbox)
     which(sapply(sapply(bb, function(x) which(x == left)), length) != 0) -> polyleft
     
+    # If multiple starting points exist at leftmost-polygon, start with the 
+    # topmost:
+    if (length(polyleft) > 1) {
+      bb_subset <- bb[polyleft]  # Subset bbox data for candidates
+      topmost_idx <- which.max(sapply(bb_subset, function(x) x[4]))  # Find the highest y
+      polyleft <- polyleft[topmost_idx]  # Select the topmost polygon
+    }
+    
     # put bearing vector back to a list object per polygon i
     # so each element is the bearings of neighbors of polygon i
     bears <- split(bearing12, unlist(pone)) 
@@ -90,7 +98,7 @@ construct_sfd <- function (spatial_df, tol = 0, dependent_var, independent_vars,
         
         # find p's next neighbor (.r = row number, .d = bearing)
         nx.r <- neigh[[p]] 
-        nx.d <- bears[[p]]  
+        nx.d <- bears[[p]] 
         
         # sort bearings of neighbors in the clockwise order starting from north
         sortma  <- sort(nx.d)
