@@ -3,10 +3,13 @@ rm(list = ls())
 library(data.table)
 library(ggplot2)
 library(ggstance)
-library(ggridges)
+library(ggpubr)
 library(MASS)
 library(stringr)
 library(scales)
+library(units)
+
+sf::sf_use_s2(FALSE)
 
 ##########################################
 # Reported Crime Trends by Policy Status #
@@ -360,10 +363,228 @@ ggsave(plot = p4, filename = "./figs/model_results/sfd/att_eviction_filings.pdf"
        device = "pdf", height = 8.3, width = 11.7, units = "in")
 
 
-##############################################################################################
+############################################################################
 # Data analysis:
-# What is the difference in eviction rates between block groups with and without the policy? #
-##############################################################################################
+# What is the difference in eviction rates between block groups w|w/o CFH? #
+#############################################################################
 
+df_evict_sum <- copy(df_sfd)
 
+df_evict_sum[, evict_rate_mean := mean(.SD$evict_rate), by = c("location", "cfh_any")]
+df_evict_sum[, evict_rate_lower := quantile(.SD$evict_rate, probs = 0.05), by = c("location", "cfh_any")]
+df_evict_sum[, evict_rate_upper := quantile(.SD$evict_rate, probs = 0.95), by = c("location", "cfh_any")]
 
+df_evict_sum <- unique(df_evict_sum[, .(location, evict_rate_mean, evict_rate_lower,
+                                        evict_rate_upper, cfh_any)])
+
+df_evict_sum[, location := str_to_title(location)]
+df_evict_sum[, cfh := ifelse(cfh_any == 1, "t", "f")]
+
+df_evict_sum <- dcast(df_evict_sum, location ~ cfh, value.var = "evict_rate_mean")
+
+plot_colors <- c("cfh_f" = "#a6e6db", "cfh_t" = "#0d2b52")
+
+p5 <- ggplot(df_evict_sum, aes(y = location, color = cfh)) +
+        geom_linerange(aes(xmin = f, xmax = t), color = 'black', linewidth = 1, alpha = 0.3) +
+        geom_point(size = 4, aes(x = t, color = "cfh_t")) +
+        geom_point(size = 4, aes(x = f, color = "cfh_f")) +
+        labs(x = "\nEviction Filings per 100 Renting Households",
+             y = "",
+             title = "Average eviction filings are greater in \nneighborhoods with crime-free housing properties",
+             color = "") +
+        scale_x_continuous(limits = c(0, 12), breaks = seq(0, 12, 4)) +
+        scale_color_manual(values = plot_colors,
+                           labels = c("No Crime-Free Housing Properties",
+                                      "Neighborhoods with Crime-Free \nHousing Properties")) +
+        theme_bw() +
+        theme(axis.line.x = element_line(colour = "black", size = 0.65),
+              axis.ticks.x = element_line(size = 0.65),
+              axis.ticks.length = unit(2, "mm"),
+              axis.ticks.y = element_blank(),
+              axis.text = element_text(size = 12, family = "sans"),
+              axis.title.y = element_text(angle = 0, vjust = 0.5),
+              axis.title = element_text(size = 12, family = "sans"),
+              legend.position = "bottom",
+              legend.justification = "left",
+              legend.text = element_text(size = 8, family = 'sans'),
+              plot.title = element_text(size = 14, family = 'sans'))
+
+ggsave(plot = p5, filename = "./figs/average_eviction_filings.pdf", 
+       device = 'pdf', bg = "transparent",
+       height = 8.27/2, width = 11.69/2, unit = 'in')
+
+#######################################
+# Maps of evictions and CFH locations #
+#######################################
+
+tiger_state  <- st_read("./data/shapefiles/tiger_state.geojson")
+tiger_county <- st_read("./data/shapefiles/tiger_county.geojson")
+tiger_place  <- st_read("./data/shapefiles/tiger_place.geojson")
+
+plot_map <- function(city){
+  
+  df_map <- setDT(st_read(paste0("./data/processed/sfd/", city, "_prepped.geojson")))
+  df_map[, evict_rate_lab := cut(evict_rate, breaks = c(-Inf, 0, 1, 5, 10, 999), 
+                                  labels = c("0", ">0 - 1", ">1 - 5", ">5 - 10", ">10"),
+                                  include.lowest = T)]
+  
+  df_map <- st_as_sf(df_map) %>%
+            st_transform(., st_crs(tiger_place))
+  
+  # Crop map based on tiger file to exact city boundaries:
+  tiger_crop <- tiger_place[tiger_place$location == city,]
+  
+  df_map <- st_crop(df_map, tiger_crop)
+  
+  # Construct random points for each CFHO locations within respective polygons:
+  sample_points <- function(geo, s){
+    as.data.table(st_sample(geo, size = s, type = "random", exact = T))
+  }
+  
+  df_cfh <- copy(df_map[df_map$cfh_num != 0,])
+  
+  df_cfh <- mcmapply(sample_points, 
+                      geo = df_cfh$geometry, 
+                      s = df_cfh$cfh_num,
+                      SIMPLIFY = F)
+  
+  df_cfh <- setDT(rbindlist(df_cfh))
+  df_cfh <- st_as_sf(df_cfh) %>%
+            st_set_crs(., st_crs(tiger_place))
+  
+  map_plot <- ggplot(df_map) + 
+                geom_sf(aes(fill = evict_rate_lab)) + 
+                geom_sf(data = df_cfh, aes(color = cfho_num), size = 2, color = 'black', 
+                        shape = 17) +
+                theme_void() +
+                scale_fill_manual(values = c("#ffffff", "#D4D4D4", "#B4B4B4", "#909090", "#636363")) +
+                labs(fill = "Number of Evictions") +
+                guides(fill = guide_legend(nrow = 1, byrow = T),
+                       color = guide_legend(nrow = 1)) +
+                theme(legend.position = "bottom",
+                      legend.direction = "vertical",
+                      legend.title.align = 0.5,
+                      plot.title = element_text(hjust = 0.5, family = 'sans', size = 16),
+                      legend.text = element_text(family = 'sans', size = 12),
+                      legend.title = element_text(family = 'sans', size = 14))
+  
+  return(map_plot)
+  
+}
+
+maps <- lapply(cities, plot_map)
+
+plots <- ggarrange(plotlist = maps, ncol = 3, nrow = 1, common.legend = T, 
+                   legend = "bottom", widths = c(1, 3.2, 3.2),
+                   labels = str_to_title(cities), hjust = c(-0.3, -2, -4),
+                   font.label = list(size = 14, family = "sans"))
+
+ggsave("./figs/cfh_maps.pdf", plots, 
+       device = "pdf", width = 11.69, height = 8.27/1.4, units = "in")
+
+##
+# Location of CFH Cities in Arizona
+##
+
+df_treated <- df[year == max(year) & treated == T, .(geoid, treated)]
+setnames(df_treated, "geoid", "place_geoid")
+
+tiger_place <- setDT(tiger_place)
+
+df_map <- join(tiger_place, df_treated, by = "place_geoid", type = "left")
+df_map <- st_as_sf(df_map[df_map$treated == T,])
+
+tiger_place <- st_as_sf(tiger_place) %>%
+               st_set_crs(st_crs(tiger_state))
+
+df_map <- st_transform(df_map, 3488) %>%
+            st_centroid(df_map) %>%
+            st_buffer(dist = set_units(5, "km")) %>%
+            st_transform(st_crs(tiger_state))
+
+df_map$title <- "Cities with a Crime-Free \nHousing Program"
+
+text_city  <- copy(df_map) %>% 
+              st_centroid() %>%
+              setDT()
+
+# Nudge names of cities
+text_city[location == "flagstaff", geometry := geometry + c(-0.3, 0.15)]
+text_city[location == "cottonwood", geometry := geometry + c(-0.35, 0.15)]
+text_city[location == "peoria", geometry := geometry + c(-0.32, 0.12)]
+text_city[location == "scottsdale", geometry := geometry + c(0.37, 0.15)]
+
+text_city[location == "glendale", geometry := geometry + c(-0.35, 0.12)]
+text_city[location == "phoenix", geometry := geometry + c(0.35, -0.04)]
+
+text_city[location == "avondale", geometry := geometry + c(-0.39, 0.1)]
+
+text_city[location == "apache junction", geometry := geometry + c(0.65, 0)]
+text_city[location == "mesa", geometry := geometry + c(0.48, 0.1)]
+
+text_city[location == "tempe", geometry := geometry + c(-0.33, -0.1)]
+text_city[location == "chandler", geometry := geometry + c(-0.32, -0.12)]
+
+text_city[location == "casa grande", geometry := geometry + c(0.5, -0.1)]
+text_city[location == "queen creek", geometry := geometry + c(0.45, -0.12)]
+
+text_city[location == "gilbert", geometry := geometry + c(0.6, -0.04)]
+
+text_city[location == "yuma", geometry := geometry + c(0.35, 0.15)]
+
+text_city[location == "marana", geometry := geometry + c(0.37, 0.03)]
+text_city[location == "tucson", geometry := geometry + c(-0.35, -0.15)]
+
+text_city[location == "sierra vista", geometry := geometry + c(0.35, 0.15)]
+
+p6  <- ggplot() + 
+        geom_sf(data = tiger_state, fill = "#f7f7f7") + 
+        geom_sf(data = tiger_county, fill = "transparent", alpha = 0.6, color = "#bdbdbd") + 
+        geom_sf(data = df_map, fill = "black", alpha = 0.4) +
+        geom_sf_text(data = text_city, aes(label = str_to_title(location), geometry = geometry)) +
+        #facet_grid(. ~ title) +
+        theme_void() +
+        labs(title = "Cities with Crime-Free Housing Programs") +
+        guides(fill = guide_legend(nrow = 2, byrow = T)) +
+        theme(legend.position = "bottom",
+              legend.direction = "vertical",
+              legend.title.align = 0.5,
+              plot.title = element_text(size = 16, family = "sans", hjust = 0.5))
+
+ggsave("./figs/state_cfh.pdf", plot = p6, 
+       device = "pdf", height = 11.69/1.2, width = 8.27/1.2, units = "in")
+
+##
+# Time Trends - Number of Renters exposed to the policy
+##
+
+df_year <- df_analysis[, .(year, location, post_treat, pop_tenants, total_population)]
+
+df_year[, total_pop := sum(.SD$total_population), by = "year"]
+df_year <- df_year[post_treat == 1,]
+
+df_year[, cfh_total := sum(.SD$total_population), by = "year"]
+
+df_year <- unique(df_year[, .(cfh_total, year)])
+
+p7 <- ggplot(df_year, aes(x = year, y = cfh_total)) +
+                    geom_point(size = 3, color = "black", alpha = 0.7) +
+                    geom_line(linewidth = 1.2, color = "black", alpha = 0.7) +
+                    scale_y_continuous(labels = label_number(scale = 1e-6),
+                                       breaks = seq(0e6, 8e6, 2e6),
+                                       limits = c(0e6, 5e6)) +
+                    scale_x_continuous(breaks = seq(2009, 2023, 2)) +
+                    labs(y = "Population \n(in millions)",
+                         x = "Year",
+                         title = "21% More Arizonans Live in Crime-Free Housing Cities Since 2009") +
+                    theme_bw() +
+                    theme(legend.position = "none",
+                          axis.ticks = element_line(linewidth = 1),
+                          axis.ticks.length = unit(5.6, "points"),
+                          axis.text = element_text(family = "sans", size = 12),
+                          axis.title = element_text(family = "sans", size = 14),
+                          axis.title.y = element_text(angle = 0, vjust = 0.5),
+                          title = element_text(size = 16, family = "sans"))
+
+ggsave("./figs/cfh_time_trends_population.pdf", p7, 
+       device = "pdf", width = 11.69, height = 8.27/1.4, units = "in")

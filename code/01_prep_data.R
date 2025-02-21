@@ -586,7 +586,15 @@ if (geocode){
 # Variable we're querying doesn't matter - we're doing this to get geometry
 # only.
 
-tiger_block <- get_acs(geography = "block group", year = 2023, variables = "B01003_001", 
+tiger_state <- get_acs(geography = "state", year = 2023, variables = "B01003_001", 
+                       state = "AZ", geometry = T, key = census_key, survey = "acs5") %>%
+                setDT %>%
+                .[, .(GEOID, NAME, geometry)] %>%
+                setnames(., c("NAME", "GEOID"), c("block_name", "block_geoid")) %>%
+                .[, block_geoid := as.numeric(block_geoid)] %>%
+                st_as_sf()
+
+tiger_county <- get_acs(geography = "county", year = 2023, variables = "B01003_001", 
                        state = "AZ", geometry = T, key = census_key, survey = "acs5") %>%
                         setDT %>%
                         .[, .(GEOID, NAME, geometry)] %>%
@@ -602,9 +610,26 @@ tiger_place <- get_acs(geography = "place", year = 2023, variables = "B01003_001
                         .[, place_geoid := as.numeric(place_geoid)] %>%
                         st_as_sf()
 
+tiger_block <- get_acs(geography = "block group", year = 2023, variables = "B01003_001", 
+                       state = "AZ", geometry = T, key = census_key, survey = "acs5") %>%
+                        setDT %>%
+                        .[, .(GEOID, NAME, geometry)] %>%
+                        setnames(., c("NAME", "GEOID"), c("block_name", "block_geoid")) %>%
+                        .[, block_geoid := as.numeric(block_geoid)] %>%
+                        st_as_sf()
+
+st_write(tiger_state, "./data/shapefiles/tiger_state.geojson", append = F, 
+         delete_dsn = T, delete_layer = T)
+
+st_write(tiger_county, "./data/shapefiles/tiger_county.geojson", append = F, 
+         delete_dsn = T, delete_layer = T)
+
+tiger_place$location <- tolower(gsub(" CDP| town| city|, Arizona", "", tiger_place$place_name))
+st_write(tiger_place, "./data/shapefiles/tiger_place.geojson", append = F, 
+         delete_dsn = T, delete_layer = T)
+
 # Hold onto TIGER places within study sites (e.g., within Maricopa county)
 
-tiger_place$location = tolower(gsub(" CDP| town| city|, Arizona", "", tiger_place$place_name))
 tiger_place <- tiger_place[tiger_place$location %in% keep_cities,]
 setorder(tiger_place, place_name)
 
