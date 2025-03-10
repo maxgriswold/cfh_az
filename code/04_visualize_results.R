@@ -436,7 +436,7 @@ plot_map <- function(city){
   
   df_map <- st_crop(df_map, tiger_crop)
   
-  # Construct random points for each CFHO locations within respective polygons:
+  # Construct random points for each CFH locations within respective polygons:
   sample_points <- function(geo, s){
     as.data.table(st_sample(geo, size = s, type = "random", exact = T))
   }
@@ -454,7 +454,7 @@ plot_map <- function(city){
   
   map_plot <- ggplot(df_map) + 
                 geom_sf(aes(fill = evict_rate_lab)) + 
-                geom_sf(data = df_cfh, aes(color = cfho_num), size = 2, color = 'black', 
+                geom_sf(data = df_cfh, aes(color = cfh_num), size = 2, color = 'black', 
                         shape = 17) +
                 theme_void() +
                 scale_fill_manual(values = c("#ffffff", "#D4D4D4", "#B4B4B4", "#909090", "#636363")) +
@@ -588,3 +588,154 @@ p7 <- ggplot(df_year, aes(x = year, y = cfh_total)) +
 
 ggsave("./figs/cfh_time_trends_population.pdf", p7, 
        device = "pdf", width = 11.69, height = 8.27/1.4, units = "in")
+
+
+##################
+# Within cities: #
+##################
+
+sfd_files <- "./data/processed/sfd/"
+files <- list.files(sfd_files)[list.files(sfd_files) %like% ".geojson"]
+files <- paste0(sfd_files, files)
+
+cfh_cities <- c("avondale", "chandler", "mesa")
+
+compare_vars <- c("evict_rate", "renter_black", "renter_asian", "renter_white_alone",
+                  "renter_native_american", "renter_hispanic_latin", 
+                  "median_income_10k", "number_rental_units")
+
+# Use Welch–Satterthwaite approximation to estimate degrees-of-freedom for
+# t-dist as a means to derive critical value for estimating CI.
+
+# This is relatively pendantic; critical values are typically in range of
+# 2.03 to 1.98 rather than routine critical value from z of 1.96.
+welch_satt <- function(sd0, sd1, n0, n1){
+  
+  d <- ((sd0/n0) + (sd1/n1))^2/(((sd0^2)/((n0^2)*(n0 - 1))) + ((sd1^2)/((n1^2)*(n1 - 1))))
+  return(d)
+  
+}
+
+formatted_results <- function(m, s, ci = F, eff_df = NA, sig = 0.025, t_dist = F, digs = 2){
+  
+  # If assuming normality, use z-score for critical value (t = F). 
+  # If effective degrees-of-freedom are set and t_dist = T, use student t to 
+  # determine critical value:
+  if (ci == T){
+    if (t_dist == T){
+      cv <- qt(p = sig, df = eff_df, lower.tail = F)
+    }else{
+      cv <- qnorm(p = sig, lower.tail = F)
+    }
+    
+    return(paste(round(m, digs), paste0("(", round(m - cv*s, digs), ", ", round(m + cv*s, digs), ")")))
+  }else{
+    return(paste(round(m, digs), paste0("(", round(s, digs), ")")))
+  }
+}
+
+calc_sfd_summaries <- function(city){
+  
+  file <- files[files %like% city]
+  df_city <- setDT(st_read(file))
+  
+  df_city[, evict_rate := (evict_count*100)/number_rental_units]
+  df_city <-  melt(df_city, id.vars = c("block_geoid", "cfh_any"), measure.vars = compare_vars)
+  
+  df_city <- df_city[, `:=`(mean = mean(.SD$value, na.rm = T),
+                            sd   = sd(.SD$value, na.rm = T),
+                            n    = .N), 
+                     by = c("cfh_any", "variable")]
+  
+  new_names <- c("Eviction Rate per 100 Rental Units", "Renter Pop: % Black",
+                 "Renter Pop: % asian", "Renter pop: % white", "Renter pop: % Indigenous",
+                 "Renter Pop: % Hispanic/Latin", "Median income", "Number of Rental Units")
+  
+  df_city[, variable := factor(mapvalues(variable, unique(df_city$variable), new_names), levels = new_names)]
+  df_city <- unique(df_city[, .(cfh_any, variable, mean, sd, n)])
+  
+  control_n <- unique(df_city[cfh_any == 0]$n)
+  treat_n   <- unique(df_city[cfh_any == 1]$n)
+  
+  df_city <- dcast(df_city, variable ~ cfh_any, value.var = c("mean", "sd", "n"))
+  
+  df_city[, mean_diff := mean_1 - mean_0]
+  
+  df_city[, sd_diff := sqrt(((sd_0^2)/n_0) + ((sd_1^2)/n_1))]
+  df_city[, df_diff := welch_satt(sd_0, sd_1, n_0, n_1)]
+  
+  df_city[, Control := formatted_results(mean_0, sd_0)]
+  df_city[, Treated := formatted_results(mean_1, sd_1)]
+  df_city[, Difference := formatted_results(mean_diff, sd_diff, ci = T, eff_df = df_diff)]
+  
+  df_city <- df_city[, c("variable", "Control", "Treated", "Difference"), with = F]
+  
+  df_city <- rbindlist(list(df_city, list("N", control_n, treat_n, "")), use.names = F)
+  
+  df_city[, City := city]
+  
+  return(df_city)
+  
+}
+
+sfd_summary <- rbindlist(lapply(cfh_cities, calc_sfd_summaries))
+sfd_summary <- sfd_summary[, .(City, variable, Control, Treated, Difference)]
+
+sfd_summary[, City := mapvalues(City, unique(sfd_summary$City),
+                                c("Avondale", "Chandler", "Mesa"))]
+
+write.csv(sfd_summary, "./figs/city_summaries_2023.csv", row.names = F)
+
+
+#######################################
+# Demographic differences by location #
+#######################################
+
+df_z <- copy(df[year == 2023, .(location, treated, pop_black, pop_asian, pop_latin_hispanic, pop_white, total_population)])
+
+df_z <- melt(df_z, 
+             id.vars = c("location", "treated", "total_population"), 
+             value.name = "prop",
+             variable.names = "var")
+
+df_z[, treated := ifelse(treated == T, 1, 0)]
+df_z[, variable := factor(variable, levels = rev(c("pop_black", "pop_asian", "pop_latin_hispanic", 
+                                                   "pop_white")))]
+
+# Then calculate median and lower/upper notches:
+df_z[, mid := mean(.SD$prop), by = c("variable", "treated")]
+df_z[, lower := t.test(.SD$prop)$conf.int[1], by = c("variable", "treated")]
+df_z[, upper := t.test(.SD$prop)$conf.int[2], by = c("variable", "treated")]
+
+plot_colors = c("#ba9c7d", "#807dba")
+
+# Remap variables:
+df_z[, treated := ifelse(treated == 1, "Yes", "No")]
+
+new_names <- c("Black", "Asian", 
+               "Hispanic", "White")
+
+df_z[, variable := factor(mapvalues(variable, unique(df_z$variable), new_names), levels = new_names)]
+
+pop_prop <- ggplot(df_z, aes(x = prop, y = treated, color = treated)) +
+  facet_wrap(~variable,  nrow = 4, strip.position = 'right') +
+  geom_point(alpha = 0.3, position = position_jitterdodge()) +
+  geom_crossbar(aes(xmin = lower, x = mid, xmax = upper)) +
+  theme_bw() +
+  labs(title = "Cities with crime-free housing programs have larger Black and Asian populations",
+       x = "Proportion of total population",
+       y = "City with CFHP") +
+  scale_color_manual(values = plot_colors) +
+  scale_x_continuous(breaks = seq(0, 1, 0.2), labels = percent) +
+  theme(strip.text.y.right = element_text(size = 14, family = 'serif', angle = 0),
+        strip.background = element_blank(),
+        axis.ticks = element_line(linewidth = 1),
+        axis.ticks.length = unit(5.6, "points"),
+        axis.text = element_text(family = "serif", size = 12),
+        axis.title = element_text(family = "serif", size = 18),
+        axis.title.y = element_text(angle = 0, vjust = 1),
+        panel.spacing = unit(0, "lines"),
+        legend.position = "none")
+
+ggsave(pop_prop, filename = "./figs/demographic_differences_2023.pdf", 
+       device = "pdf", bg = "transparent", width = 11.7, height = 8.3, units = "in")

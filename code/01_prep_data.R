@@ -10,6 +10,7 @@ library(dplyr)
 library(tidycensus)
 library(tidygeocoder)
 library(sf)
+library(tidyr)
 
 sf::sf_use_s2(FALSE)
 options(tigris_use_cache = TRUE)
@@ -523,9 +524,9 @@ code_coordinates <- function(df, added_text = ""){
 # Also load CFH property locations within cities of Maricopa county.
 # Geocode these locations.
 
+keep_cities <- c("avondale", "chandler", "mesa")
+
 if (geocode){
-  
-  keep_cities <- c("avondale", "chandler", "mesa")
   
   property_loc_files <- "./data/crime_free_housing/property_locations/"
   property_locs <- paste0(property_loc_files, list.files(property_loc_files))
@@ -618,18 +619,23 @@ tiger_block <- get_acs(geography = "block group", year = 2023, variables = "B010
                         .[, block_geoid := as.numeric(block_geoid)] %>%
                         st_as_sf()
 
-st_write(tiger_state, "./data/shapefiles/tiger_state.geojson", append = F, 
-         delete_dsn = T, delete_layer = T)
 
-st_write(tiger_county, "./data/shapefiles/tiger_county.geojson", append = F, 
-         delete_dsn = T, delete_layer = T)
 
 tiger_place$location <- tolower(gsub(" CDP| town| city|, Arizona", "", tiger_place$place_name))
-st_write(tiger_place, "./data/shapefiles/tiger_place.geojson", append = F, 
-         delete_dsn = T, delete_layer = T)
+
+if (overwrite){
+  st_write(tiger_state, "./data/shapefiles/tiger_state.geojson", append = F, 
+           delete_dsn = T, delete_layer = T)
+  
+  st_write(tiger_county, "./data/shapefiles/tiger_county.geojson", append = F, 
+           delete_dsn = T, delete_layer = T)
+  
+  st_write(tiger_place, "./data/shapefiles/tiger_place.geojson", append = F, 
+           delete_dsn = T, delete_layer = T)
+}
+
 
 # Hold onto TIGER places within study sites (e.g., within Maricopa county)
-
 tiger_place <- tiger_place[tiger_place$location %in% keep_cities,]
 setorder(tiger_place, place_name)
 
@@ -738,9 +744,11 @@ sfd_analysis_prep <- function(city_name){
   dd <- st_as_sf(dd) %>%
           st_transform(4326)
   
-  sfd_save <- paste0("./data/processed/sfd/", city_name, "_prepped.geojson")
-  st_write(dd, sfd_save, append = F, delete_dsn = T, delete_layer = T)
-  
+  if (overwrite){
+    sfd_save <- paste0("./data/processed/sfd/", city_name, "_prepped.geojson")
+    st_write(dd, sfd_save, append = F, delete_dsn = T, delete_layer = T)
+  }
+
   return(dd)
   
 }
@@ -756,3 +764,161 @@ shapefiles <- lapply(keep_cities, sfd_analysis_prep)
 #            geom_sf(data = mesa_props)
 
 # Looks correct to me.
+
+########################
+# Prep Mesa crime data #
+########################
+
+df_dispatch <- fread("./data/mesa_crime/mesa_dispatch_2021_2025.csv")
+df_incident <- fread("./data/mesa_crime/mesa_incidents_2015_2015.csv")
+
+df_incident <- df_incident[`Report Year` == 2024, c("Crime Type", "Address", "Report Year", "Latitude", "Longitude")]
+
+# Mesa PD does not report geocodes for "sensitive crimes", which includes suicide, incest,
+# sexual abuse or assault, molestation, or homicides (removing non-address locations removes
+# 4k/43k observations). 
+df_incident <- df_incident[Address != "",]
+
+df_dispatch <- df_dispatch[, c("Received Date Time", "Final Case Type Description", "Geolocation")]
+df_dispatch[, year := as.numeric(gsub(".*\\/.*\\/| .*", "", df_dispatch$`Received Date Time`))]
+df_dispatch <- df_dispatch[year == 2024,]
+
+# Dispatch geocodes also blind for sensitive information. This primarily effects 
+# sexual assaults, which would have been coded as "violent events", reducing sample by 650/5401 events.
+df_dispatch <- df_dispatch[Geolocation != "",]
+
+# For both incidents and dispatch, I am using my best judgment to reduce the set of
+# codes to those pertaining to either assaults/violence, theft/burglarly, drugs/alcohol,
+# or disorderly conduct.
+
+dispatch_violence <- c("ASSAULT", "KIDNAPPING", "SEXUAL ASSAULT", "SUBJECT WITH GUN", "HOMICIDE",
+                       "BOMB LOCATED or THREAT", "SUBJECT WITH KNIFE", "STABBING/CUTTING", "SHOTS FIRED",
+                       "ASSAULT W/DEADLY WEAPON", "SHOOTING")
+
+dispatch_burglary <- c("CRIMINAL DAMAGE", "BURGLARY ALARM", "THEFT - RESIDENTIAL", 
+                       "BURGLARY - COMMERCIAL", "STRONG ARM ROBBERY", "ARMED ROBBERY", 
+                       "BURGLARY - RESIDENTIAL", "SHOPLIFTING", "BURGLARY - VEHICLE", 
+                       "ARMED ROBBERY ALARM", "SHOPLIFTING MINOR", "ARMED ROBBERY PRONET")
+
+dispatch_drugs    <- c("DRUGS", "DRUNK", "DRIVING UNDER THE INFLUENCE")
+
+dispatch_disorder <- c("NOISE DISTURBANCE", "NEIGHBOR TROUBLE", "THREATS", "CIVIL MATTER",
+                       "FIGHT", "FAMILY FIGHT", "JUVENILES DISTURBING", "INDECENT EXPOSURE")
+
+df_dispatch[`Final Case Type Description` %in% dispatch_violence, dispatch_type := "dispatch_violence"]
+df_dispatch[`Final Case Type Description` %in% dispatch_burglary, dispatch_type := "dispatch_burglary"]
+df_dispatch[`Final Case Type Description` %in% dispatch_drugs, dispatch_type := "dispatch_drugs"]
+df_dispatch[`Final Case Type Description` %in% dispatch_disorder, dispatch_type := "dispatch_disorder"]
+
+df_dispatch <- df_dispatch[!is.na(dispatch_type), .(year, dispatch_type, Geolocation)]
+
+incident_violence <- c("DEATH - OTHER", "FORCIBLE SODOMY", "HOMICIDE/NON-NEG MANSLTR - DV", "HUMAN TRAFFICKING", 
+                       "KIDNAP / UNLAWFL IMPRISNMNT DV", "OFFICER INVOLVED SHOOTING", "SEXUAL ASSAULT / RAPE - DV",
+                       "HUMAN TRAFFICKG -COMM SEX ACTS", "SIMPLE ASSAULT - OFCR", "AGGRAVATED ASSAULT", "SIMPLE ASSAULT - DV",
+                       "SEXUAL ASSAULT / RAPE", "SIMPLE ASSAULT", "HOMICIDE/NON-NEG MANSLGHTR", "SEXUAL ASSAULT W OBJECT -CHILD",
+                       "AGGRAVATED ASSAULT -DV")
+
+incident_burglary <- c("THEFT - FROM BUILDING", "STOLEN VEHICLE-MESA", "STOLEN VEHICLE-FRAUD MEANS",
+                       "STOLEN VEHICLE-RENTAL VEHICLE", "THEFT - PURSE-SNATCHING", "THEFT/BURGLARY -FRM VENDG MACH",
+                       "THEFT -  ALL OTHER", "THEFT-SHOPLIFTING", "STOLEN VEHICLE-FAIL TO RETURN", "BURGLARY",
+                       "THEFT/BURGLARY FROM VEHICLE", "ROBBERY", "THEFT/BURGLARY -VEH PART/ACCES",
+                       "THEFT - SHOPLIFTING")
+
+incident_drugs    <- c("AGGRAVATED DUI", "PROPERTY - FOUND DRUGS", "EXTREME DUI (BAC >.15%)", "DUI MISDEMEANOR DRUG",
+                       "DRUG PARAPHERNALIA", "INFO - DRUG / ALCOHOL RELATED", "DUI UNDER 21",
+                       "DRUG/NARCOTIC - POSSESSION")
+
+incident_disorder <- c("TRESPASS", "DISORDERLY CONDUCT", "PORNOGRAPHY/OBSCENE MATERIAL", 
+                       "INDECENT EXPOSURE", "CRIMINAL DAMAGE <$1,000", "DISORDERLY CONDUCT -DV",
+                       "CRIMINAL DAMAGE >$1,000", "HARASSMENT - DV", "TRESPASS DV", "VOYEURISM")
+
+df_incident[`Crime Type` %in% incident_violence, incident_type := "incident_violence"]
+df_incident[`Crime Type` %in% incident_burglary, incident_type := "incident_burglary"]
+df_incident[`Crime Type` %in% incident_drugs, incident_type := "incident_drugs"]
+df_incident[`Crime Type` %in% incident_disorder, incident_type := "incident_disorder"]
+
+df_incident <- df_incident[!is.na(incident_type)]
+
+# Try to geocode addresses which indicate intersection of blocks in incident_dataset
+df_incident[Address %like% "Block of" & is.na(Latitude), Address := gsub("\\/", "&", Address)]
+df_incident[Address %like% "Block of" & is.na(Latitude), Address := gsub("Block of ", "", Address)]
+
+df_incident_missing <- df_incident[is.na(Latitude),]
+
+df_incident_missing[, Address := paste0(Address,", Mesa, AZ")]
+setnames(df_incident_missing, "Address", "address")
+
+df_incident_missing <- batch_geocodes(df_incident_missing)
+df_incident_missing[, `:=` (Latitude = NULL, Longitude = NULL)]
+setnames(df_incident_missing, c("lat", "long"), c("Latitude", "Longitude"))
+
+df_incident <- df_incident[, .(Latitude, Longitude, incident_type)]
+df_incident <- df_incident[!is.na(Latitude),]
+
+df_incident_missing <- df_incident_missing[, .(Latitude, Longitude, incident_type)]
+
+df_incident <- rbind(df_incident, df_incident_missing)
+
+setnames(df_incident, c("incident_type", "Latitude", "Longitude"), c("crime_type", "lat", "long"))
+
+# Dispatch data coded geometry as a character. So extract this information out of it:
+df_dispatch[, long := gsub(".*\\((-?[0-9\\.]+) .*", "\\1", Geolocation)]
+df_dispatch[, lat := gsub(".* (-?[0-9\\.]+)\\)", "\\1", Geolocation)]
+
+df_dispatch <- df_dispatch[, .(dispatch_type, lat, long)]
+setnames(df_dispatch, "dispatch_type", "crime_type")
+
+# Join dispatch data w/ incident data:
+df_mesa_crime <- rbind(df_incident, df_dispatch)
+
+# Determine block groups for each event. 
+  
+df_mesa_crime <- geo_in_block(df_mesa_crime, tiger_block)
+
+df_mesa_crime[, crime_counts := .N, by = c("block_geoid", "crime_type")]
+
+df_mesa_crime <- unique(df_mesa_crime[, .(block_geoid, crime_counts, crime_type)])
+  
+# Add on census indicators and cfh property locations:
+df_mesa_crime <- join(df_mesa_crime, df_census_blocks[year == 2023,], by = "block_geoid", type = 'left')
+df_mesa_crime <- df_mesa_crime[!is.na(year)]
+
+dd_props <- df_properties[location == "mesa",]
+dd_props <- geo_in_block(dd_props, tiger_block)
+dd_props[, cfh_num := .N, by = "block_geoid"]
+dd_props <- unique(dd_props[, .(block_geoid, cfh_num)])
+
+df_mesa_crime <- join(df_mesa_crime, dd_props, by = "block_geoid", type = "left")
+  
+df_mesa_crime[, median_income_10k := median_income/1e4]
+df_mesa_crime[is.na(cfh_num), cfh_num := 0]
+df_mesa_crime[, cfh_any := ifelse(cfh_num > 0, 1, 0)]  
+df_mesa_crime[, location := "mesa"]
+
+df_mesa_crime <- df_mesa_crime[, .(location, block_geoid, crime_type, crime_counts,
+                                 cfh_num, cfh_any, number_rental_units,
+                                 renter_household_total, total_population, median_income_10k,
+                                 renter_white_alone, renter_black, renter_asian, renter_native_american, 
+                                 renter_hispanic_latin, percent_poverty_150)]
+
+# Convert counts to rate 10k:
+df_mesa_crime[, crime_counts:= (crime_counts/total_population)*1e4]
+
+df_mesa_crime <- as.data.table(pivot_wider(df_mesa_crime, names_from = crime_type, 
+                             values_from = crime_counts, values_fill = list(crime_counts = 0)))
+
+# Add on geometry info and reduce to city blocks in mesa:
+tiger_block <- as.data.table(tiger_block)
+df_mesa_crime <- join(df_mesa_crime, tiger_block, by = "block_geoid", type = "left")
+
+df_mesa_crime <- st_as_sf(df_mesa_crime) %>%
+                  st_transform(4326)
+
+df_mesa_crime <- df_mesa_crime[df_mesa_crime$block_geoid %in% city_blocks$mesa$block_geoid,]
+
+if (overwrite){
+  sfd_save <- paste0("./data/processed/sfd/mesa_crime_prepped.geojson")
+  st_write(df_mesa_crime, sfd_save, append = F, delete_dsn = T, delete_layer = T)
+}
+
+

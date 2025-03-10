@@ -8,8 +8,13 @@ model_dir <- "./data/models"
 
 run_sfd_models <- function(city_name, dep, ind, model_name, model_type = "sfd"){
   
-  sfd_save <- paste0("./data/processed/sfd/", city_name, "_prepped.geojson")
-  df_city <- st_read(sfd_save)
+  if (dep == "evict_rate"){
+    sfd_save <- paste0("./data/processed/sfd/", city_name, "_prepped.geojson")
+    df_city <- st_read(sfd_save)
+  }else{
+    sfd_save <- paste0("./data/processed/sfd/mesa_crime_prepped.geojson")
+    df_city <- st_read(sfd_save)
+  }
   
   # Hold onto minimum variables:
   df_city <- df_city[, c(dep, ind, "geometry", "block_geoid")]
@@ -146,4 +151,62 @@ sfd_results_count_adj   <- lapply(cfh_cities, run_sfd_models,
 
 names(sfd_results_count_adj) <- cfh_cities
 saveRDS(sfd_results_count_adj, sprintf("%s/cfh_count_adj.rds", model_dir))
-        
+
+# Also, investigate incidents and dispatch data in mesa:
+
+# Note: I am deliberately using counts of "crime" events at the block group level.
+# rather than crime rates per population.
+# For one, counts display a similar magnitudes across block groups in mesa.
+# while rates are far more unstable. 
+# Two, crime counts are not necessarily driven by total population, mostly
+# notably, drug and burglary crime-types. Instead, measure of land area or ambient
+# population could serve better as a rate variable (if I were to continue
+# improving this analysis).
+# Three, there are multiple blocks with large crime countsbut no population
+# in Mesa.
+
+# For more details on these arguments, see also:
+# Andresen, 2005 (https://academic.oup.com/bjc/article/46/2/258/355560),
+
+# I am including population in adjusted specification!
+adjusted_spec <- c("median_income_10k", "renter_white_alone", "renter_black", "renter_asian",
+                   "renter_hispanic_latin", "percent_poverty_150", "total_population")
+
+
+dep_vars <- c("incident_violence", "incident_burglary", "incident_disorder", "incident_drugs",
+              "dispatch_violence", "dispatch_burglary", "dispatch_disorder", "dispatch_drugs")
+
+
+# Using a lambda function to loop over dependent variables rather than cities for
+# these models
+unadjusted_any <- lapply(dep_vars, function(y) run_sfd_models(city = "mesa",
+                                                              dep = y,
+                                                              ind = c("cfh_any"),
+                                                              model_name = "cfh_any_unadj")) 
+
+names(unadjusted_any) <- dep_vars
+saveRDS(unadjusted_any, sprintf("%s/cfh_crime_any_unadj", model_dir))
+
+adjusted_any <- lapply(dep_vars, function(y) run_sfd_models(city = "mesa",
+                                                            dep = y,
+                                                            ind = c("cfh_any", adjusted_spec),
+                                                            model_name = "cfh_any_adj")) 
+
+names(adjusted_any) <- dep_vars
+saveRDS(adjusted_any, sprintf("%s/cfh_crime_any_adj", model_dir))
+
+unadjusted_num <- lapply(dep_vars, function(y) run_sfd_models(city = "mesa",
+                                                              dep = y,
+                                                              ind = c("cfh_num"),
+                                                              model_name = "cfh_num_unadj")) 
+
+names(unadjusted_num) <- dep_vars
+saveRDS(unadjusted_num, sprintf("%s/cfh_crime_num_unadj", model_dir))
+
+adjusted_num <- lapply(dep_vars, function(y) run_sfd_models(city = "mesa",
+                                                            dep = y,
+                                                            ind = c("cfh_num", adjusted_spec),
+                                                            model_name = "cfh_num_adj")) 
+
+names(adjusted_num) <- dep_vars
+saveRDS(adjusted_num, sprintf("%s/cfh_crime_num_adj", model_dir))
