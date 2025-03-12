@@ -1,0 +1,16 @@
+
+\begin{tabular}{rccc}
+\toprule
+ & Total Crimes & Total Assaults & Total Burglaries\\
+\midrule
+Time Period = 0 & \makecell[c]{5.54\\(11.37)} & \makecell[c]{-0.64\\(1.81)} & \makecell[c]{0.41\\(1.62)}\\
+\addlinespace
+1 & \makecell[c]{4.06\\(9.56)} & \makecell[c]{0.27\\(2.39)} & \makecell[c]{0.89\\(2.12)}\\
+\addlinespace
+2 & \makecell[c]{4.16\\(9.65)} & \makecell[c]{0.6\\(2.15)} & \makecell[c]{1.84\\(4.05)}\\
+\addlinespace
+3 & \makecell[c]{-1.36\\(3.56)} & \makecell[c]{-0.08\\(2.85)} & \makecell[c]{0.26\\(1.25)}\\
+\addlinespace
+Average & \makecell[c]{3.1\\(6.76)} & \makecell[c]{0.04\\(2.07)} & \makecell[c]{0.85\\(2.1)}\\
+\bottomrule
+\end{tabular}

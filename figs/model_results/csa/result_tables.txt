@@ -1,0 +1,59 @@
+Total Crime: 
+    
+\begin{tabular}{rcc}
+\toprule
+ & (1) & (2)\\
+\midrule
+Time Period = 0 & \makecell[c]{11.633$^{***}$\\(4.334)} & \makecell[c]{11.633$^{***}$\\(4.203)}\\
+\addlinespace
+1 & \makecell[c]{8.992\\(7.125)} & \makecell[c]{8.992\\(7.111)}\\
+\addlinespace
+2 & \makecell[c]{10.15$^{*}$\\(5.295)} & \makecell[c]{10.15$^{**}$\\(5.155)}\\
+\addlinespace
+3 & \makecell[c]{3.961\\(3.103)} & \makecell[c]{3.961\\(3.182)}\\
+\addlinespace\midrule
+Observations & 810 & 810\\
+Clusters & 54 & 54\\
+Adjusted & No & Yes\\
+\bottomrule
+\end{tabular}
+
+Total Assaults: 
+    
+\begin{tabular}{rcc}
+\toprule
+ & (1) & (2)\\
+\midrule
+Time Period = 0 & \makecell[c]{0.498\\(0.99)} & \makecell[c]{0.498\\(0.936)}\\
+\addlinespace
+1 & \makecell[c]{1.639\\(1.706)} & \makecell[c]{1.639\\(1.662)}\\
+\addlinespace
+2 & \makecell[c]{2.033$^{*}$\\(1.151)} & \makecell[c]{2.033$^{*}$\\(1.149)}\\
+\addlinespace
+3 & \makecell[c]{2.216\\(2.124)} & \makecell[c]{2.216\\(2.081)}\\
+\addlinespace\midrule
+Observations & 810 & 810\\
+Clusters & 54 & 54\\
+Adjusted & No & Yes\\
+\bottomrule
+\end{tabular}
+
+Total Burglaries: 
+    
+\begin{tabular}{rcc}
+\toprule
+ & (1) & (2)\\
+\midrule
+Time Period = 0 & \makecell[c]{0.611\\(0.924)} & \makecell[c]{0.611\\(1.026)}\\
+\addlinespace
+1 & \makecell[c]{1.798\\(1.394)} & \makecell[c]{1.798\\(1.464)}\\
+\addlinespace
+2 & \makecell[c]{2.846\\(2.266)} & \makecell[c]{2.846\\(1.948)}\\
+\addlinespace
+3 & \makecell[c]{0.685\\(0.886)} & \makecell[c]{0.685\\(0.878)}\\
+\addlinespace\midrule
+Observations & 810 & 810\\
+Clusters & 54 & 54\\
+Adjusted & No & Yes\\
+\bottomrule
+\end{tabular}

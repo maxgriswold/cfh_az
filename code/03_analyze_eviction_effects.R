@@ -162,7 +162,7 @@ saveRDS(sfd_results_count_adj, sprintf("%s/cfh_count_adj.rds", model_dir))
 # notably, drug and burglary crime-types. Instead, measure of land area or ambient
 # population could serve better as a rate variable (if I were to continue
 # improving this analysis).
-# Three, there are multiple blocks with large crime countsbut no population
+# Three, there are multiple blocks with large crime counts but no population
 # in Mesa.
 
 # For more details on these arguments, see also:

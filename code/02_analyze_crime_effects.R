@@ -7,19 +7,24 @@ rm(list = ls())
 library(augsynth)
 library(data.table)
 library(ggplot2)
+library(ggrepel)
+
 library(did)
 library(plyr)
 library(gridExtra)
+
+library(modelsummary)
+library(stargazer)
 
 # Code options:
 remove_outliers   <- T
 run_placebo       <- F
 run_lambda_search <- F
-estimate_did      <- F
+estimate_did      <- T
 
 df <- fread("./data/processed/df_crime_analysis.csv")
 
-# Remove  always-treated locations, and single pre-treatment locations
+# Removealways-treated locations, and single pre-treatment locations
 df <- df[implementation_date > 2010|is.na(implementation_date),]
 
 # Sensitivity test: Does removing outliers w/ implausible UCR data change
@@ -327,18 +332,21 @@ if (run_lambda_search){
 # Final models #
 ################
 
-df_att <- list()
-
 if (remove_outliers){
   lambda_vals <- list("index_total" = 75, "assault_total" = 80, "burglary_total" = 100)
 }else{
   lambda_vals <- list("index_total" = 100, "assault_total" = 100, "burglary_total" = 1)
 }
 
+df_att <- list()
+model_tables <- list()
+
 for (o in outcome_vars){
   
   mod <- run_multi(o, df, covars = covs, l = lambda_vals[[o]])
   res <- mod$att
+
+  model_tables[[o]] <- mod
   
   # Get average of crime rates in 2023 to calculate percentage effects
   crime_obs <- df[year == 2023, mean(get(o)), ]
@@ -361,6 +369,102 @@ df_att <- rbindlist(df_att)
 
 df_att[, outcome_nice := c("Total Crime", "Assaults", "Burglaries")]
 
+# Plot balance and estimated effects:
+plot_bal <- function(o){
+  
+  mod <- model_tables[[o]]
+  
+  # Hold onto lags for minimum across the treated groups:
+  ests <- mod$att
+  setDT(ests)
+  ests <- ests[Time >= -5,]
+  ests[, label := ifelse(Time == 3, Level, NA),]
+  
+  ests[, is_avg := ifelse(Level == "Average", "A", "B")]
+  
+  o_name <- ifelse(o == "index_total", "total crime", ifelse(o == "assault_total", "total assault", "total burglary"))
+  
+  # Modified plot from the augsynth package
+  bal <-  ggplot(ests, aes(x = Time, y = Estimate, group = Level,
+                   color = is_avg, alpha = is_avg)) +
+        geom_point(size = 1) +
+        geom_line(size = 1) +
+        geom_label_repel(aes(label = label), nudge_x = 1.3, na.rm = T) +
+        geom_hline(yintercept = 0, lty = 2) +
+        geom_vline(xintercept = 0, lty = 2) +
+        geom_ribbon(data = ests[Level == "Average",], aes(ymin = lower_bound, ymax = upper_bound), alpha = 0.2, fill = "black", color = NA) +
+        scale_alpha_manual(values = c(1, 0.5)) +
+        scale_color_manual(values=c("#333333", "#818181")) +
+        scale_x_continuous(limits = c(-5, 5),
+                           breaks = seq(-5, 3, 2),
+                           expand = c(0, 2)) +
+        guides(alpha = F, color = F) +
+        theme_bw() +
+        labs(x = "Time relative to treatment",
+             y = "Estimate",
+             title = sprintf("Estimated effect of CFH on %s rates per 1k people", o_name)) +
+        theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+  
+  return(bal)
+  
+}
+
+plots <- lapply(outcome_vars, plot_bal)
+
+ggsave("./figs/model_results/multisynth/balance_plots.pdf",
+       plot = marrangeGrob(plots, nrow = 1, ncol = 1, top = NULL),
+       width = 11.69,
+       height = 8.27)
+
+# Save table results
+combine_ests <- function(o){
+  
+  res <- model_tables[[o]]$att
+  res <- res[Level == "Average",]
+  res[, outcome := o]
+  
+  return(res)
+  
+}
+
+# Prep result table for methods:
+
+res_table <- rbindlist(lapply(outcome_vars, combine_ests))
+res_table <- res_table[Time >= 0|is.na(Time),]
+
+# For overall, set Event time == 4 so it appears last in the table
+# Recode to average effect later:
+res_table[is.na(Time), Time := 4]
+
+res_table <- res_table[, .(outcome, Time, Estimate, Std.Error)]
+setnames(res_table, names(res_table), c("outcome", 'event_time', "est", "se"))
+
+res_table[, pval := 2*(1 - pnorm(abs(est/se)))]
+res_table[, stars := ifelse(pval < 0.01, "$^{***}$", ifelse(pval < 0.05, "$^{**}$", ifelse(pval < 0.1, "$^{*}$", "")))]
+res_table[, est := paste0(round(est, 2), stars, "\n(", round(se, 2), ")")]
+
+res_table[, est := linebreak(est, align = "c")]
+
+res_table <- dcast(res_table, event_time~outcome, value.var = "est")
+
+res_table[, event_time := as.character(event_time)]
+res_table[event_time == "4", event_time := "Average"]
+
+res_table[event_time == "0", event_time := "Time Period = 0"]
+res_table <- res_table[, .(event_time, index_total, assault_total, burglary_total)]
+  
+res <- kable(res_table, format = 'latex', booktabs = T, escape = F,
+             col.names = c("", "Total Crimes", "Total Assaults", "Total Burglaries"), align = c("rccc"),
+             linesep = "") %>%
+        row_spec(1, extra_latex_after = "\\addlinespace") %>%
+        row_spec(2, extra_latex_after = "\\addlinespace") %>%
+        row_spec(3, extra_latex_after = "\\addlinespace") %>%
+        row_spec(4, extra_latex_after = "\\addlinespace")
+
+sink("./figs/model_results/multisynth/result_table.txt")
+cat(res)
+sink()
+
 p <- ggplot(df_att, aes(y = outcome_nice, x = percent_mean, xmin = percent_lower, xmax = percent_upper)) +
         geom_point(size = 3) +
         geom_linerange(linewidth = 1, alpha = 0.3) +
@@ -379,23 +483,238 @@ ggsave(plot = p, filename = "./figs/estimated_cfh_effects_crime.pdf", height = 8
 # Additional check: Does using DID (Callaway and Sant'anna) lead to substantially different estimates? 
 
 if (estimate_did){
+  
   df[is.na(implementation_date), implementation_date := 0]
   df[, location := as.numeric(as.factor(location))]
   
-  csa_1 <- att_gt(yname = "index_total", 
+  csa_total_unadj <- att_gt(yname = "index_total", 
+                      tname = "year", 
+                      idname = "location", 
+                      gname = "implementation_date", 
+                      control_group = "notyettreated", 
+                      data = df, 
+                      xformla = NULL,
+                      est_method = "dr", 
+                      bstrap = T,
+                      biters = 1000,
+                      base_period	= "universal",
+                      allow_unbalanced_panel = F)
+  
+  att_total_unadj <- aggte(csa_total_unadj, type = 'dynamic', balance_e = 3)
+  
+  csa_assault_unadj <- att_gt(yname = "assault_total", 
+                        tname = "year", 
+                        idname = "location", 
+                        gname = "implementation_date", 
+                        control_group = "notyettreated", 
+                        data = df, 
+                        xformla = NULL,
+                        est_method = "dr", 
+                        bstrap = T,
+                        biters = 1000,
+                        base_period	= "universal",
+                        allow_unbalanced_panel = F)
+  
+  att_assault_unadj <- aggte(csa_assault_unadj, type = 'dynamic', balance_e = 3)
+  
+  csa_burglarly_unadj <- att_gt(yname = "burglary_total", 
+                          tname = "year", 
+                          idname = "location", 
+                          gname = "implementation_date", 
+                          control_group = "notyettreated", 
+                          data = df, 
+                          xformla = NULL,
+                          est_method = "dr", 
+                          bstrap = T,
+                          biters = 1000,
+                          base_period	= "universal",
+                          allow_unbalanced_panel = F)
+  
+  att_burglarly_unadj <- aggte(csa_burglarly_unadj, type = 'dynamic', balance_e = 3)
+  
+  # Add on city-level covariates.
+  
+  cov_form <- formula(paste("~ ", paste(covs, collapse = " + ")))
+  
+  csa_total <- att_gt(yname = "index_total", 
                   tname = "year", 
                   idname = "location", 
                   gname = "implementation_date", 
                   control_group = "notyettreated", 
                   data = df, 
-                  xformla = NULL,
+                  xformla = cov_form,
+                  est_method = "dr", 
+                  bstrap = T,
+                  biters = 1000,
+                  base_period	= "universal",
+                  allow_unbalanced_panel = F,
+                  clustervars="location")
+  
+  att_total <- aggte(csa_total, type = 'dynamic', balance_e = 3)
+  
+  csa_assault <- att_gt(yname = "assault_total", 
+                  tname = "year", 
+                  idname = "location", 
+                  gname = "implementation_date", 
+                  control_group = "notyettreated", 
+                  data = df, 
+                  xformla = cov_form,
                   est_method = "dr", 
                   bstrap = T,
                   biters = 1000,
                   base_period	= "universal",
                   allow_unbalanced_panel = F)
   
-  csa_att <- aggte(csa_1, type = 'dynamic', balance_e = 3)
+  att_assault <- aggte(csa_assault, type = 'dynamic', balance_e = 3)
+  
+  csa_burglarly <- att_gt(yname = "burglary_total", 
+                        tname = "year", 
+                        idname = "location", 
+                        gname = "implementation_date", 
+                        control_group = "notyettreated", 
+                        data = df, 
+                        xformla = cov_form,
+                        est_method = "dr", 
+                        bstrap = T,
+                        biters = 1000,
+                        base_period	= "universal",
+                        allow_unbalanced_panel = F)
+  
+  att_burglarly <- aggte(csa_burglarly, type = 'dynamic', balance_e = 3)
+  
+  collect_mods <- list(att_total_unadj, att_total, 
+                       att_assault_unadj, att_assault,
+                       att_burglarly_unadj, att_burglarly)
+  
+  model_types <- c("unadjusted", "adjusted") 
+  outcomes <- c("total", "assault", "burglarly")
+  
+  names(collect_mods) <- as.vector(outer(model_types, outcomes, FUN = paste, sep = "_"))
+  
+  
+  event_table <- function(mods, titl){
+    
+    res <- list()
+    
+    for (i in 1:2){
+      
+      mod <- mods[[i]]
+      
+      pval <- 2 * (1 - pnorm(abs(mod$att.egt/mod$se.egt)))
+      stars <- ifelse(pval < 0.01, "$^{***}$", ifelse(pval < 0.05, "$^{**}$", ifelse(pval < 0.1, "$^{*}$", "")))
+      est <- paste0(round(mod$att.egt, 3), stars, "\n(", round(mod$se.egt, 3), ")")
+      
+      res[[i]] <- est
+      
+    }
+    
+    dd <- data.table("Time Period" = mod$egt,
+                     Unadjusted = res[[1]],
+                     Adjusted = res[[2]])
+    
+    dd <- dd[`Time Period` >= 0 & `Time Period` <= 3,]
+    dd[, `Time Period` := as.character(`Time Period`)]
+    dd[`Time Period`== "0", `Time Period` := "Time Period = 0"]
+    
+    clusts <- mods[[1]]$DIDparams$n
+    obs    <- dim(mods[[1]]$DIDparams$data)[[1]]
+    
+    dd_add <- data.table("Time Period" = c("Observations", "Clusters", "Adjusted"),
+                         "Unadjusted" = c(obs, clusts, "No"),
+                         "Adjusted" = c(obs, clusts, "Yes"))
+    
+    dd <- rbind(dd, dd_add)
+    
+    dd$Adjusted <- linebreak(dd$Adjusted, align = "c")
+    dd$Unadjusted <- linebreak(dd$Unadjusted, align = "c")
+    
+    res <- kable(dd, format = 'latex', booktabs = T, escape = F,
+                 col.names = c("", "(1)", "(2)"), align = c("rcc"),
+                 linesep = "") %>%
+      row_spec(1, extra_latex_after = "\\addlinespace") %>%
+      row_spec(2, extra_latex_after = "\\addlinespace") %>%
+      row_spec(3, extra_latex_after = "\\addlinespace") %>%
+      row_spec(4, extra_latex_after = "\\addlinespace\\midrule")
+    
+    return(res)
+    
+  }
+  
+  table_total    <- event_table(list(att_total_unadj, att_total))
+  table_assault  <- event_table(list(att_assault_unadj, att_assault))
+  table_burglary <- event_table(list(att_burglarly_unadj, att_burglarly))
+  
+  sink("./figs/model_results/csa/result_tables.txt")
+  cat("Total Crime: 
+    ")
+  cat(table_total)
+  cat("
+
+Total Assaults: 
+    ")
+  cat(table_assault)
+  cat("
+
+Total Burglaries: 
+    ")
+  cat(table_burglary)
+  sink()
+  
+  # Combine event-time estimates into single dataframe to make
+  # plot for checking parallel trends. 
+  
+  extract_ests <- function(out, mod_type){
+    
+    mod <- paste0(mod_type, "_", out)
+    mod <- collect_mods[[mod]]
+    
+    dd <- data.table(event_time = mod$egt,
+                     est = mod$att.egt,
+                     se = mod$se.egt,
+                     outcome = out,
+                     model = mod_type)
+    
+    dd[, ci_lower := est - 1.96*se]
+    dd[, ci_upper := est + 1.96*se]
+    
+    return(dd)
+    
+  }
+  
+  args <- expand.grid(out = outcomes, mod_type = model_types)
+  
+  dd_history <- mapply(extract_ests, out = args$out, mod_type = args$mod_type, SIMPLIFY = F)
+  dd_history <- rbindlist(dd_history)
+  
+  # Remove rows for the reference period and outside the range of
+  # CSA bounds
+  dd_history <- dd_history[event_time != -1 & event_time <= 5 & event_time >= -5,]
+  dd_history[, outcome := mapvalues(outcome, from = c("total", "assault", "burglarly"), 
+                                    to = c("Total crime rate", "Total assault rate","Total burglarly rate"))]
+  
+  dd_history[, model := mapvalues(model, from = c("unadjusted", "adjusted"), to = c("CSA Unadjusted", "CSA Adjusted"))]
+  
+  hplot <- ggplot(dd_history, aes(x = event_time, y = est, color = model)) +
+    geom_point(size = 2, position = position_dodge(width = 0.7)) +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), 
+                  width = 0, size = 1, position = position_dodge(width = 0.7)) +
+    geom_hline(aes(yintercept = 0), linetype = 'dashed', size = 1) +
+    scale_color_manual(values=c("#8856a7", "#2166ac"), 
+                       breaks = c("CSA Unadjusted", "CSA Adjusted")) +
+    facet_wrap(~outcome) +
+    labs(title = "Effect of CFH on crime rates per 1k people",
+         y = "Effect size", x = "Time relative to treatment", color = "Model") +
+    theme_bw() +
+    theme(legend.position = 'bottom',
+          plot.title = element_text(hjust = 0.5),
+          axis.title = element_text(family = "sans", size = 12),
+          axis.title.y = element_text(angle = 0, vjust = 0.7),
+          axis.text = element_text(family = "sans", size = 10),
+          legend.text = element_text(family = 'sans', size = 10),
+          strip.background = element_blank())
+  
+  ggsave(plot = hplot, filename = "./figs/model_results/csa/event_study.pdf",
+         device = "pdf", height = 8.3, width = 11.7, units = "in")
   
 }
 
