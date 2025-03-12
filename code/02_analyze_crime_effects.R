@@ -500,7 +500,8 @@ if (estimate_did){
                       base_period	= "universal",
                       allow_unbalanced_panel = F)
   
-  att_total_unadj <- aggte(csa_total_unadj, type = 'dynamic', balance_e = 3)
+  att_total_unadj <- aggte(csa_total_unadj, type = 'dynamic', balance_e = 3, 
+                           na.rm = T, min_e = -5)
   
   csa_assault_unadj <- att_gt(yname = "assault_total", 
                         tname = "year", 
@@ -515,7 +516,8 @@ if (estimate_did){
                         base_period	= "universal",
                         allow_unbalanced_panel = F)
   
-  att_assault_unadj <- aggte(csa_assault_unadj, type = 'dynamic', balance_e = 3)
+  att_assault_unadj <- aggte(csa_assault_unadj, type = 'dynamic', balance_e = 3, 
+                             na.rm = T, min_e = -5)
   
   csa_burglarly_unadj <- att_gt(yname = "burglary_total", 
                           tname = "year", 
@@ -530,10 +532,10 @@ if (estimate_did){
                           base_period	= "universal",
                           allow_unbalanced_panel = F)
   
-  att_burglarly_unadj <- aggte(csa_burglarly_unadj, type = 'dynamic', balance_e = 3)
+  att_burglarly_unadj <- aggte(csa_burglarly_unadj, type = 'dynamic', balance_e = 3, 
+                               na.rm = T, min_e = -5)
   
   # Add on city-level covariates.
-  
   cov_form <- formula(paste("~ ", paste(covs, collapse = " + ")))
   
   csa_total <- att_gt(yname = "index_total", 
@@ -550,7 +552,8 @@ if (estimate_did){
                   allow_unbalanced_panel = F,
                   clustervars="location")
   
-  att_total <- aggte(csa_total, type = 'dynamic', balance_e = 3)
+  att_total <- aggte(csa_total, type = 'dynamic', balance_e = 3, 
+                     na.rm = T, min_e = -5)
   
   csa_assault <- att_gt(yname = "assault_total", 
                   tname = "year", 
@@ -565,7 +568,8 @@ if (estimate_did){
                   base_period	= "universal",
                   allow_unbalanced_panel = F)
   
-  att_assault <- aggte(csa_assault, type = 'dynamic', balance_e = 3)
+  att_assault <- aggte(csa_assault, type = 'dynamic', balance_e = 3, 
+                       na.rm = T, min_e = -5)
   
   csa_burglarly <- att_gt(yname = "burglary_total", 
                         tname = "year", 
@@ -580,7 +584,8 @@ if (estimate_did){
                         base_period	= "universal",
                         allow_unbalanced_panel = F)
   
-  att_burglarly <- aggte(csa_burglarly, type = 'dynamic', balance_e = 3)
+  att_burglarly <- aggte(csa_burglarly, type = 'dynamic', balance_e = 3, 
+                         na.rm = T, min_e = -5)
   
   collect_mods <- list(att_total_unadj, att_total, 
                        att_assault_unadj, att_assault,
@@ -590,7 +595,6 @@ if (estimate_did){
   outcomes <- c("total", "assault", "burglarly")
   
   names(collect_mods) <- as.vector(outer(model_types, outcomes, FUN = paste, sep = "_"))
-  
   
   event_table <- function(mods, titl){
     
@@ -604,17 +608,26 @@ if (estimate_did){
       stars <- ifelse(pval < 0.01, "$^{***}$", ifelse(pval < 0.05, "$^{**}$", ifelse(pval < 0.1, "$^{*}$", "")))
       est <- paste0(round(mod$att.egt, 3), stars, "\n(", round(mod$se.egt, 3), ")")
       
-      res[[i]] <- est
+      # Add on overall ATT as well:
+      pval <- 2 * (1 - pnorm(abs(mod$overall.att/mod$overall.se)))
+      stars <- ifelse(pval < 0.01, "$^{***}$", ifelse(pval < 0.05, "$^{**}$", ifelse(pval < 0.1, "$^{*}$", "")))
+      est_avg<- paste0(round(mod$overall.att, 3), stars, "\n(", round(mod$overall.se, 3), ")")
+      
+      res[[i]] <- c(est, est_avg)
       
     }
     
-    dd <- data.table("Time Period" = mod$egt,
+    dd <- data.table("Time Period" = c(mod$egt, 4),
                      Unadjusted = res[[1]],
                      Adjusted = res[[2]])
     
-    dd <- dd[`Time Period` >= 0 & `Time Period` <= 3,]
+    dd <- dd[`Time Period` >= 0 & `Time Period` <= 4,]
     dd[, `Time Period` := as.character(`Time Period`)]
     dd[`Time Period`== "0", `Time Period` := "Time Period = 0"]
+    
+    # Note that period "4" is actually the average effect extracted earlier:
+    dd[`Time Period`== "4", `Time Period` := "Average"]
+    
     
     clusts <- mods[[1]]$DIDparams$n
     obs    <- dim(mods[[1]]$DIDparams$data)[[1]]
@@ -634,7 +647,8 @@ if (estimate_did){
       row_spec(1, extra_latex_after = "\\addlinespace") %>%
       row_spec(2, extra_latex_after = "\\addlinespace") %>%
       row_spec(3, extra_latex_after = "\\addlinespace") %>%
-      row_spec(4, extra_latex_after = "\\addlinespace\\midrule")
+      row_spec(4, extra_latex_after = "\\addlinespace") %>%
+      row_spec(5, extra_latex_after = "\\addlinespace\\midrule")
     
     return(res)
     

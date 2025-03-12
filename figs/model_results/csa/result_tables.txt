@@ -4,13 +4,15 @@ Total Crime:
 \toprule
  & (1) & (2)\\
 \midrule
-Time Period = 0 & \makecell[c]{11.633$^{***}$\\(4.334)} & \makecell[c]{11.633$^{***}$\\(4.203)}\\
+Time Period = 0 & \makecell[c]{11.633$^{***}$\\(3.934)} & \makecell[c]{13.352$^{**}$\\(5.595)}\\
 \addlinespace
-1 & \makecell[c]{8.992\\(7.125)} & \makecell[c]{8.992\\(7.111)}\\
+1 & \makecell[c]{8.992\\(7.265)} & \makecell[c]{2.281\\(5.563)}\\
 \addlinespace
-2 & \makecell[c]{10.15$^{*}$\\(5.295)} & \makecell[c]{10.15$^{**}$\\(5.155)}\\
+2 & \makecell[c]{10.15$^{*}$\\(5.327)} & \makecell[c]{5.596\\(6.91)}\\
 \addlinespace
-3 & \makecell[c]{3.961\\(3.103)} & \makecell[c]{3.961\\(3.182)}\\
+3 & \makecell[c]{3.961\\(2.919)} & \makecell[c]{2.331\\(3.179)}\\
+\addlinespace
+Average & \makecell[c]{8.684$^{***}$\\(3.096)} & \makecell[c]{5.89\\(8.402)}\\
 \addlinespace\midrule
 Observations & 810 & 810\\
 Clusters & 54 & 54\\
@@ -24,13 +26,15 @@ Total Assaults:
 \toprule
  & (1) & (2)\\
 \midrule
-Time Period = 0 & \makecell[c]{0.498\\(0.99)} & \makecell[c]{0.498\\(0.936)}\\
+Time Period = 0 & \makecell[c]{0.498\\(0.992)} & \makecell[c]{1.048\\(1.239)}\\
 \addlinespace
-1 & \makecell[c]{1.639\\(1.706)} & \makecell[c]{1.639\\(1.662)}\\
+1 & \makecell[c]{1.639\\(1.684)} & \makecell[c]{0.925\\(1.044)}\\
 \addlinespace
-2 & \makecell[c]{2.033$^{*}$\\(1.151)} & \makecell[c]{2.033$^{*}$\\(1.149)}\\
+2 & \makecell[c]{2.033$^{*}$\\(1.171)} & \makecell[c]{0.585\\(1.752)}\\
 \addlinespace
-3 & \makecell[c]{2.216\\(2.124)} & \makecell[c]{2.216\\(2.081)}\\
+3 & \makecell[c]{2.216\\(2.136)} & \makecell[c]{-0.281\\(0.717)}\\
+\addlinespace
+Average & \makecell[c]{1.596\\(1.381)} & \makecell[c]{0.57\\(0.608)}\\
 \addlinespace\midrule
 Observations & 810 & 810\\
 Clusters & 54 & 54\\
@@ -44,13 +48,15 @@ Total Burglaries:
 \toprule
  & (1) & (2)\\
 \midrule
-Time Period = 0 & \makecell[c]{0.611\\(0.924)} & \makecell[c]{0.611\\(1.026)}\\
+Time Period = 0 & \makecell[c]{0.611\\(1.049)} & \makecell[c]{1.471\\(2.339)}\\
 \addlinespace
-1 & \makecell[c]{1.798\\(1.394)} & \makecell[c]{1.798\\(1.464)}\\
+1 & \makecell[c]{1.798\\(1.484)} & \makecell[c]{1.142\\(2.095)}\\
 \addlinespace
-2 & \makecell[c]{2.846\\(2.266)} & \makecell[c]{2.846\\(1.948)}\\
+2 & \makecell[c]{2.846\\(2.096)} & \makecell[c]{0.753\\(4.927)}\\
 \addlinespace
-3 & \makecell[c]{0.685\\(0.886)} & \makecell[c]{0.685\\(0.878)}\\
+3 & \makecell[c]{0.685\\(0.888)} & \makecell[c]{0.862\\(2.005)}\\
+\addlinespace
+Average & \makecell[c]{1.485\\(1.25)} & \makecell[c]{1.057\\(1.205)}\\
 \addlinespace\midrule
 Observations & 810 & 810\\
 Clusters & 54 & 54\\
