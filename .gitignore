@@ -1,7 +1,14 @@
 *.xlsx
-*.pdf
 data/eviction_filings/maricopa_county/evictions_maricopa_county_2024.csv
 data/eviction_filings/evictions_maricopa_county_2024_geocoded.csv
 *.xlsx
 data/mesa_crime/mesa_incidents_2015_2015.csv
 data/mesa_crime/mesa_dispatch_2021_2025.csv
+data/eviction_filings/maricopa_county/Eviction Spreadsheet Terminology (1).pdf
+data/eviction_filings/maricopa_county/Eviction Spreadsheet Terminology (2).pdf
+data/eviction_filings/maricopa_county/Eviction Spreadsheet Terminology (3).pdf
+data/eviction_filings/maricopa_county/Eviction Spreadsheet Terminology (4).pdf
+data/eviction_filings/maricopa_county/Eviction Spreadsheet Terminology (5).pdf
+data/eviction_filings/maricopa_county/Eviction Spreadsheet Terminology.pdf
+data/eviction_filings/maricopa_county/Eviction Timeline - EN.pdf
+data/eviction_filings/maricopa_county/Eviction Timeline - SP.pdf

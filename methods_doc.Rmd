@@ -3,11 +3,12 @@ title: "Methods for Analyzing Arizona Crime-Free Housing"
 author: "Max Griswold"
 date: "2025-03-11"
 output: 
-  html_document:
+  html_document: 
     toc: true
     toc_float: true
 bibliography: az_cfh.bib
 csl: numeric.csl
+link-citations: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -16,18 +17,38 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Preface
 
-This document outlines the methods used to analyze Crime-Free Housing programs in Arizona. In most instances, these methods follow the approaches used in Griswold et al., 2023 and Griswold et al., 2024. 
+This document outlines the methods used to analyze Crime-Free Housing (CFH) programs in Arizona. In most instances, these methods follow the approaches used in Griswold et al., 2023 and Griswold et al., 2024. This document is intended for internal QA review at RAND. Accordingly, this document deviates from a conventional method description, assuming the reader has some familiarity with the described methods and aiming to present each approach concisely.
 
-```{r cars}
-summary(cars)
-```
+[Section one](#data) describes the data used in this analysis, [section two](#crime) details the methods used to analyze program effects on crime across cities, [section three](#evictions) investigates the impact of CFH on eviction filings within cities, and [section four](#demographics) provides a description of sociodemographic differences across cities and neighborhood blocks with and without CFHs. Each of these sections also contains short-write up of findings to be sent to the AZ republic, describing the results in plain lanugae. [Section five](#audience) concludes with a short-form description of the methods in section 1 -4. This description is intended for general audiences and would be provided to the AZ Republic to be printed along with their reporting.
 
-## Including Plots
+## Section 1. Data {#data}
 
-You can also embed plots, for example:
+### Treatment data {#treat_data}
 
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
+Treatment data was obtained from AZ Republic, who reviewed ordinances in AZ to determine which sites had active crime-free housing programs. Dates were obtained from public record requests. I reviewed the ordinances, program websites, and public record emails AZ Republic received and found them consistent with the types of records we reviewed for the RAND report. For one site, I was not able to confirm the date or program existence (Bullhead city) and removed this site from the analysis. Data on treated cities and dates are available in the [GitHub repository](https://github.com/maxgriswold/cfh_az/tree/main) within the "data/crime_free_housing" folder. Similar to the RAND report, I restricted treated sites to those which implemented a program between 2011 and 2022, given the availability of 5-year ACS surveys @ACS2023.
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+AZ republic also provided excel sheets which indicates properties certified as crime-free within several cities in 2023. These files were comparable to those used in the RAND report. I geocoded these addresses using a combination of the census API, ArcGIS API, and openstreetmaps API. I validated these geocodes by comparing obtained zip codes with those listed in the address. Geocodes were merged with census TIGER shapefiles to identify which census-block groups contained crime-free housing units.
+
+### Outcome data {#outcome_data}
+
+For outcome data, I followed the same procedures as the RAND report. In more detail:
+
+#### Arrests (Total, Assaults, Burglaries)
+
+Data on total crime counts, assaults, and burglaries were obtained from the Uniform Crime Reporting - Summary Reporting System database on reported incidents and arrests, using files prepped by Jacob Kaplan @DVN/OESSD1_2024. I merged these files to law enforcement agencies using the FBI crosswalk database @u.s.bureauofjusticestatisticsLawEnforcementAgency2018, then aggregated counts to the municipal-level. I restricted counts to total incidents, burglary, and assault crimes following suggestions in Kaplan, 2025 @kaplan2025. To ensure data accuracy, I reviewed time trends of crime counts at the municipal-level, marking possible sites as outliers due to implausible trends or lack of reporting within a given year (plots can be [found here](https://github.com/maxgriswold/cfh_az/blob/main/figs/crimes_by_city_year.pdf). I then aggregated assault-types and burglary-type crimes into total categories, and transformed total incidents, assaults, and burglaries into rates per 1k people. Lastly, I merged these aggregate rates with [municipal covariates](#crime) for the years 2011 - 2023.
+
+#### Filed evictions
+
+The AZ Republic provided data on filed evictions in Mesa county, which were obtained from the Maricopa County Superior Court. Following the same procedures as Griswold, 2024 @griswold2024analyzing, I geocoded obtained records for the year 2023, then merged these records to TIGER shapefiles for Census block-groups. Filing counts were then aggregated within each block-group.
+
+### Covariates {#covariate_data}
+
+## Section 2. Effect of CFH on Crime {#crime}
+
+## Section 2. Effect of CFH on Evictions {#evictions}
+
+## Section 4. Sociodemographic comparisons {#demographics}
+
+## Section 5. General Audience Method Description
+
+## References
