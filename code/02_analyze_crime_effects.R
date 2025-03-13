@@ -8,6 +8,7 @@ library(augsynth)
 library(data.table)
 library(ggplot2)
 library(ggrepel)
+library(kableExtra)
 
 library(did)
 library(plyr)

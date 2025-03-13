@@ -1558,17 +1558,109 @@ housing units.</p>
 </div>
 <div id="outcome_data" class="section level3">
 <h3>Outcome data</h3>
+<p>For outcome data, I followed the same procedures as the RAND report.
+All procedures can be found in the <a href="https://github.com/maxgriswold/cfh_az/blob/main/code/01_prep_data.R">processing
+code</a>. In more detail:</p>
+<div id="arrests-total-assaults-burglaries" class="section level4">
+<h4>Arrests (Total, Assaults, Burglaries)</h4>
 <p>Data on total crime counts, assaults, and burglaries were obtained
 from the Uniform Crime Reporting - Summary Reporting System database on
-reported incidents and arrests, using prepped files by Jacob Kaplan
-<span class="citation">[<a href="#ref-DV"><strong>DV?</strong></a>]</span>.</p>
+reported incidents and arrests, using files prepped by Jacob Kaplan
+<span class="citation">[<a href="#ref-DVN/OESSD1_2024">2</a>]</span>. I
+merged these files to law enforcement agencies using the FBI crosswalk
+database <span class="citation">[<a href="#ref-u.s.bureauofjusticestatisticsLawEnforcementAgency2018">3</a>]</span>,
+then aggregated counts to the municipal-level. I restricted counts to
+total incidents, burglary, and assault crimes following suggestions in
+Kaplan, 2025 <span class="citation">[<a href="#ref-kaplan2025">4</a>]</span>. To ensure data accuracy, I
+reviewed time trends of crime counts at the municipal-level, marking
+possible sites as outliers due to implausible trends or lack of
+reporting within a given year (plots can be <a href="https://github.com/maxgriswold/cfh_az/blob/main/figs/crimes_by_city_year.pdf">found
+here</a>. I then aggregated assault-types and burglary-type crimes into
+total categories, and transformed total incidents, assaults, and
+burglaries into rates per 1k people. Lastly, I merged these aggregate
+rates with <a href="#crime">municipal covariates</a> for the years 2011
+- 2023.</p>
+</div>
+<div id="filed-evictions" class="section level4">
+<h4>Filed evictions</h4>
+<p>The AZ Republic provided data on filed evictions in Mesa county,
+which were obtained from the Maricopa County Superior Court. Following
+the same procedures as Griswold, 2024 <span class="citation">[<a href="#ref-griswold2024analyzing">5</a>]</span>, I geocoded obtained
+records for the year 2023, then merged these records to TIGER shapefiles
+for Census block-groups. Filing counts were then aggregated within each
+block-group.</p>
+</div>
 </div>
 <div id="covariate_data" class="section level3">
 <h3>Covariates</h3>
+<p>Using the Census API, I extracted ACS 5-year series variables at the
+census place and block-group level for the years 2009 - 2023. Variables
+included median age, total population, population proportions by sex,
+renter racial/ethnic groups (white, white-only, Hispanic/Latin,
+indigenous, Asian, Pacific Islander, other), income below 150% of the
+Federal Poverty Line, and immigration status, number of rental units,
+number of renting households, and median income. Median income was
+adjusted to be in 2023 dollars using the <a href="https://fred.stlouisfed.org/series/CPIAUCSL">U.S. BLS</a> CPI for
+All Urban Consumers: All Items in U.S. City Average. Covariates were
+merged with outcome and treatment variables at the municipal level (for
+arrests) and at the block-group level (for incidents).</p>
 </div>
 </div>
 <div id="crime" class="section level2">
 <h2>Section 2. Effect of CFH on Crime</h2>
+<p>I followed the general strategy in Griswold, 2023 <span class="citation">[<a href="#ref-griswold2023evaluation">6</a>]</span> to
+estimate the effect of crime-free housing policies on arrests. Code for
+this analysis can be found <a href="https://github.com/maxgriswold/cfh_az/blob/main/code/02_analyze_crime_effects.R">in
+the repo</a>. All analyses were conducted using both all available
+arrest data, along with restricting the analysis to remove
+municipalities with implausible arrest trends (see <a href="#outcome_data">previous section</a>. I did not find a meaningful
+difference in results when restricting the analysis to sites with
+complete arrest data and chose display all results removing these
+outlier locations.</p>
+<p>Using a Callaway and Sant’Anna difference-in-difference estimator
+<span class="citation">[<a href="#ref-callaway2021difference">7</a>]</span>, I estimated
+unconditional and conditional models for total crime rates, total
+assault rates, and total burglarly rates. Conditional models included
+controls for population proportions by race/ethnicity, median income (in
+2023 dollars), and total population. I estimated models using
+not-yet-treated groups as controls, computed group-time average effects
+using a doubly-robust approach, and used models to estimated dynamic
+average treatment effects. Model tables with estimates for relative time
+following treatment can be found in <a href="#csa_estimates">the
+appendix</a>.</p>
+<p>I checked <a href="https://github.com/maxgriswold/cfh_az/blob/main/figs/model_results/csa/event_study.pdf">event-study
+plots</a> for the possible existence of parallel trends, following
+recommendations in Roth, 2024 <span class="citation">[<a href="#ref-roth2024interpreting">8</a>]</span> which suggests this
+approach can be valid if the first year prior to treatment is used as
+the reference category. I did not notice severe violations of parallel
+trends in these plots.</p>
+<p>Given the small sample size (54 units, 4 treated), I also estimated
+treatment effects using the augmented synthetic control method <span class="citation">[<a href="#ref-ben2021augmented">9</a>]</span>. In my
+applied work, I have found this method more reliably estimates unbiased
+policy effects when there is a small number of treated units and larger
+number of controls. I continued to estimate both unconditional and
+conditional models for each outcome. For conditional models, I followed
+existing recommendations <span class="citation">[<a href="#ref-ben2021augmented">9</a>]</span>- <span class="citation">[<a href="#ref-pickett2022myths">10</a>]</span> to use a ridge regression
+(L2 regularization) to improve pretreatment fit. To choose <span class="math inline">\(\lambda\)</span> for L2 regularization in each
+model, I performed a <a href="https://github.com/maxgriswold/cfh_az/blob/main/figs/model_results/multisynth/lambda_search_full_data.pdf">grid-search</a>
+over parameter values between 0.01 and 100, selecting values that
+minimized imbalance. I then estimated dynamic treatment effects for each
+outcome and model specification, which can be found in <a href="#ascm_estimates">the appendix</a>.</p>
+<p>To validate the model results, I followed recommendations in Abadie,
+2021 <span class="citation">[<a href="#ref-abadie2021using">11</a>]</span> and Ben-Michael et al., 2021
+<span class="citation">[<a href="#ref-ben2021augmented">9</a>]</span>.
+Similar to difference-in-differences, I investigated [imbalance
+plots](<a href="https://github.com/maxgriswold/cfh_az/blob/main/figs/model_results/multisynth/balance_plots.pdf" class="uri">https://github.com/maxgriswold/cfh_az/blob/main/figs/model_results/multisynth/balance_plots.pdf</a>
+to ensure balance in the pre-treatment periods. Across models, I did not
+find a significant imbalance in pretreatment years.</p>
+<p>I also conducted a placebo tests where I set each control unit to be
+a treated unit with an implementation date equivalent to the first
+treated unit. I then estimated placebo models for each outcome and
+specification, comparing the obtained estimate to those in the main
+model. The <a href="https://github.com/maxgriswold/cfh_az/blob/main/figs/model_results/multisynth/placebo_tests_outliers_removed.pdf">plots
+show</a> that estimated effects from the placebo test are aligned with
+those in the primary model, indicating the effect of treatment is likely
+due to treatment rather than noise.</p>
 </div>
 <div id="evictions" class="section level2">
 <h2>Section 2. Effect of CFH on Evictions</h2>
@@ -1579,12 +1671,80 @@ reported incidents and arrests, using prepped files by Jacob Kaplan
 <div id="section-5.-general-audience-method-description" class="section level2">
 <h2>Section 5. General Audience Method Description</h2>
 </div>
-<div id="references" class="section level2 unnumbered">
-<h2 class="unnumbered">References</h2>
+<div id="references" class="section level2">
+<h2>References</h2>
+<pre><code>        &lt;div id=&quot;refs&quot;&gt;&lt;/div&gt;</code></pre>
+</div>
+<div id="appendix" class="section level2">
+<h2>Appendix</h2>
+<div id="ascm_estimates" class="section level3">
+<h3>Augmented Synthetic Control Dynamic Effect Estimates</h3>
+
+</div>
+<div id="callaway-and-santann-dynamic-effect-estimates" class="section level3">
+<h3>Callaway and Sant’Ann Dynamic Effect Estimates</h3>
+<p>Total Crime:</p>
+<p>Total Assaults:</p>
+<p>Total Burglaries:</p>
 <div id="refs" class="references csl-bib-body" entry-spacing="0">
 <div id="ref-ACS2023" class="csl-entry">
 <div class="csl-left-margin">[1] </div><div class="csl-right-inline">U.S. Census Bureau, American community survey
 5-year data (2019-2023), (2023). <a href="https://www.census.gov/data/developers/data-sets/acs-5year.html">https://www.census.gov/data/developers/data-sets/acs-5year.html</a>.</div>
+</div>
+<div id="ref-DVN/OESSD1_2024" class="csl-entry">
+<div class="csl-left-margin">[2] </div><div class="csl-right-inline">J.
+Kaplan, Summary <span>Reporting System</span> (<span>SRS</span>) -
+<span>Offenses Known</span> and <span>Clearances</span> by
+<span>Arrest</span> (<span>Return A</span>), (2024). https://doi.org/<a href="https://doi.org/10.7910/DVN/OESSD1">10.7910/DVN/OESSD1</a>.</div>
+</div>
+<div id="ref-u.s.bureauofjusticestatisticsLawEnforcementAgency2018" class="csl-entry">
+<div class="csl-left-margin">[3] </div><div class="csl-right-inline">U.S. Bureau of Justice Statistics, Law
+<span>Enforcement Agency Identifiers Crosswalk</span>, <span>United
+States</span>, 2012, (2018). https://doi.org/<a href="https://doi.org/10.3886/ICPSR35158.v2">10.3886/ICPSR35158.v2</a>.</div>
+</div>
+<div id="ref-kaplan2025" class="csl-entry">
+<div class="csl-left-margin">[4] </div><div class="csl-right-inline">J.
+Kaplan, Decoding FBI crime data, 2025. <a href="https://ucrbook.com/">https://ucrbook.com/</a>.</div>
+</div>
+<div id="ref-griswold2024analyzing" class="csl-entry">
+<div class="csl-left-margin">[5] </div><div class="csl-right-inline">M.
+Griswold, L. Baker, S.B. Hunter, J. Ward, C. Ren, Analyzing the effect
+of crime-free housing policies on completed evictions using spatial
+first differences, Cityscape 26 (2024) 195–240.</div>
+</div>
+<div id="ref-griswold2023evaluation" class="csl-entry">
+<div class="csl-left-margin">[6] </div><div class="csl-right-inline">M.
+Griswold, S.B. Holliday, A. Sizemore, C. Ren, L. Baker, K. Howell, O.
+Osoba, J. Williams, J.M. Ward, S.B. Hunter, An evaluation of crime-free
+housing policies, RAND Report (2023).</div>
+</div>
+<div id="ref-callaway2021difference" class="csl-entry">
+<div class="csl-left-margin">[7] </div><div class="csl-right-inline">B.
+Callaway, P.H. Sant’Anna, Difference-in-differences with multiple time
+periods, Journal of Econometrics 225 (2021) 200–230.</div>
+</div>
+<div id="ref-roth2024interpreting" class="csl-entry">
+<div class="csl-left-margin">[8] </div><div class="csl-right-inline">J.
+Roth, Interpreting event-studies from recent difference-in-differences
+methods, (2024). <a href="https://arxiv.org/abs/2401.12309">https://arxiv.org/abs/2401.12309</a>.</div>
+</div>
+<div id="ref-ben2021augmented" class="csl-entry">
+<div class="csl-left-margin">[9] </div><div class="csl-right-inline">E.
+Ben-Michael, A. Feller, J. Rothstein, The augmented synthetic control
+method, Journal of the American Statistical Association 116 (2021)
+1789–1803.</div>
+</div>
+<div id="ref-pickett2022myths" class="csl-entry">
+<div class="csl-left-margin">[10] </div><div class="csl-right-inline">R.E. Pickett, J. Hill, S.K. Cowan, The myths of
+synthetic control: <span>Recommendations</span> for practice, NYU
+Working Papers, 2022.</div>
+</div>
+<div id="ref-abadie2021using" class="csl-entry">
+<div class="csl-left-margin">[11] </div><div class="csl-right-inline">A.
+Abadie, Using synthetic controls: <span>Feasibility</span>, data
+requirements, and methodological aspects, Journal of Economic Literature
+59 (2021) 391–425.</div>
+</div>
 </div>
 </div>
 </div>
