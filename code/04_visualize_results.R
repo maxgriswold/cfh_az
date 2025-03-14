@@ -595,7 +595,8 @@ ggsave("./figs/cfh_time_trends_population.pdf", p7,
 ##################
 
 sfd_files <- "./data/processed/sfd/"
-files <- list.files(sfd_files)[list.files(sfd_files) %like% ".geojson"]
+files <- list.files(sfd_files)[list.files(sfd_files) %like% ".geojson" &
+                               !(list.files(sfd_files) %like% "crime")]
 files <- paste0(sfd_files, files)
 
 cfh_cities <- c("avondale", "chandler", "mesa")
@@ -616,7 +617,7 @@ welch_satt <- function(sd0, sd1, n0, n1){
   
 }
 
-formatted_results <- function(m, s, ci = F, eff_df = NA, sig = 0.025, t_dist = F, digs = 2){
+formatted_results <- function(m, s, ci = F, eff_df = NA, sig = 0.025, t_dist = F, digs = 1){
   
   # If assuming normality, use z-score for critical value (t = F). 
   # If effective degrees-of-freedom are set and t_dist = T, use student t to 
@@ -649,10 +650,17 @@ calc_sfd_summaries <- function(city){
   
   new_names <- c("Eviction Rate per 100 Rental Units", "Renter Pop: % Black",
                  "Renter Pop: % asian", "Renter pop: % white", "Renter pop: % Indigenous",
-                 "Renter Pop: % Hispanic/Latin", "Median income", "Number of Rental Units")
+                 "Renter Pop: % Hispanic/Latin", "Median income", 
+                 "Number of Rental Units")
   
   df_city[, variable := factor(mapvalues(variable, unique(df_city$variable), new_names), levels = new_names)]
   df_city <- unique(df_city[, .(cfh_any, variable, mean, sd, n)])
+  
+  # Convert proportions to percentages:
+  df_city[variable %like% "%", `:=`(mean = mean*100, sd = sd*100)]
+  
+  # Convert median income into raw amounts:
+  df_city[variable %like% "income", `:=`(mean = mean*1e4, sd = sd*1e4)]
   
   control_n <- unique(df_city[cfh_any == 0]$n)
   treat_n   <- unique(df_city[cfh_any == 1]$n)
