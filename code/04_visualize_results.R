@@ -699,6 +699,8 @@ write.csv(sfd_summary, "./figs/city_summaries_2023.csv", row.names = F)
 # Demographic differences by location #
 #######################################
 
+df <- fread("./data/processed/df_crime_analysis.csv")
+
 df_z <- copy(df[year == 2023, .(location, treated, pop_black, pop_asian, pop_latin_hispanic, pop_white, total_population)])
 
 df_z <- melt(df_z, 
