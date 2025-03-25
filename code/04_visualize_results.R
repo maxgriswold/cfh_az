@@ -65,6 +65,29 @@ p1 <- ggplot(df_avg, aes(x = year, y = totals, color = post_treat)) +
 
 ggsave(plot = p1, filename = "./figs/reported_crime_trends.pdf", height = 8.27, width = 8.27)
 
+# Strip plot down to essential elements: change in crime between
+# 2010 and 2023:
+
+df_min <- df_avg[year == 2010 | year == 2020,]
+
+ggplot(df_min, aes(x = year, y = totals, color = post_treat)) +
+  geom_point(size = 3) +
+  geom_line(size = 1) +
+  labs(y = "") +
+  lims(y = c(0, 200)) +
+  scale_x_continuous(breaks = c(2010, 2020)) +
+  scale_color_manual(values = c("#8da0cb", "#66c2a5")) +
+  facet_wrap(~crime_type, ncol = 1, strip.position = "left") +
+  theme_classic() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(angle = 0),
+        axis.ticks = element_blank(),
+        legend.position = "none",
+        line = element_blank(),
+        axis.text.y = element_blank())
+
+ggsave(filename = "./figs/crime_trend_proto.svg", height = 8.27, width = 4.27)
+
 ##################
 # SFD ATT effects#
 ##################
