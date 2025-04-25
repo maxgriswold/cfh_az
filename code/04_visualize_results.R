@@ -3,11 +3,13 @@ rm(list = ls())
 library(data.table)
 library(ggplot2)
 library(ggstance)
+library(ggridges)
 library(ggpubr)
 library(MASS)
 library(stringr)
 library(scales)
 library(units)
+library(parallel)
 
 sf::sf_use_s2(FALSE)
 
@@ -71,7 +73,7 @@ ggsave(plot = p1, filename = "./figs/reported_crime_trends.pdf", height = 8.27, 
 df_min <- df_avg[year == 2010 | year == 2020,]
 
 ggplot(df_min, aes(x = year, y = totals, color = post_treat)) +
-  geom_point(size = 3) +
+  geom_point(size = 4) +
   geom_line(size = 1) +
   labs(y = "") +
   lims(y = c(0, 200)) +
@@ -86,7 +88,7 @@ ggplot(df_min, aes(x = year, y = totals, color = post_treat)) +
         line = element_blank(),
         axis.text.y = element_blank())
 
-ggsave(filename = "./figs/crime_trend_proto.svg", height = 8.27, width = 4.27)
+ggsave(filename = "./figs/crime_trend_proto.svg", height = 4.27, width = 4.27)
 
 ##################
 # SFD ATT effects#
@@ -110,8 +112,13 @@ combine_sfd_df <- function(file){
 sfd_datasets <- paste0("./data/processed/sfd/", list.files("./data/processed/sfd/"))
 sfd_models   <- paste0("./data/models/", list.files("./data/models/"))
 
+sfd_datasets <- sfd_datasets[!(sfd_datasets %like% "crime")]
+sfd_models <- sfd_models[!(sfd_models %like% "crime")]
+
 df_sfd <- setDT(ldply(sfd_datasets, combine_sfd_df))
 df_sfd[, geometry := NULL]
+
+cfh_cities <- c("avondale", "chandler", "mesa", "scottsdale")
 
 # Read in a model for a given city. Using estimated betas and vcov,
 # simulate 1000 parameter draws from each model and combine into one data.frame
@@ -328,8 +335,8 @@ sim_cf_overall <- function(modelname){
   
 }
 
-args <- expand.grid(loc = unique(sim_results$location),
-                    modelname = unique(sim_results$model_name))
+args <- expand.grid(loc = cfh_cities,
+                    modelname = unique(sim_results$model_name)[!(unique(sim_results$model_name) %like% "crime")])
 
 sim_beta_cf <- rbindlist(mapply(sim_cf, 
                                 modelname = args$modelname,
@@ -351,12 +358,12 @@ p3 <- ggplot(sim_beta_cf, aes(x = percent_change, y = model_name, fill = after_s
       theme(strip.background = element_blank(),
             legend.position = "bottom")
 
-ggsave(plot = p2, filename = "./figs/model_results/sfd/summary_att_density_plots.pdf",
+ggsave(plot = p3, filename = "./figs/model_results/sfd/summary_att_density_plots.pdf",
        device = "pdf", height = 8.3, width = 11.7, units = "in")
 
 summary_beta_cf <- sim_beta_cf[, quantile(.SD$percent_change, probs = c(0.05, 0.5, 0.95)), by = c("location", "model_name")]
 
-percentiles <- rep(c("q025", "q50", "q975"), dim(args)[1] + dim(args)[1]/3)
+percentiles <- rep(c("q025", "q50", "q975"), dim(args)[1] + dim(args)[1]/4)
 summary_beta_cf[, percentile := percentiles]
 summary_beta_cf <- dcast(summary_beta_cf, formula = location + model_name ~ percentile, value.var = "V1")
 
@@ -495,11 +502,11 @@ plot_map <- function(city){
   
 }
 
-maps <- lapply(cities, plot_map)
+maps <- lapply(cfh_cities, plot_map)
 
-plots <- ggarrange(plotlist = maps, ncol = 3, nrow = 1, common.legend = T, 
-                   legend = "bottom", widths = c(1, 3.2, 3.2),
-                   labels = str_to_title(cities), hjust = c(-0.3, -2, -4),
+plots <- ggarrange(plotlist = maps, ncol = 2, nrow = 2, common.legend = T, 
+                   legend = "bottom", 
+                   labels = str_to_title(cfh_cities),
                    font.label = list(size = 14, family = "sans"))
 
 ggsave("./figs/cfh_maps.pdf", plots, 
@@ -581,7 +588,7 @@ ggsave("./figs/state_cfh.pdf", plot = p6,
 # Time Trends - Number of Renters exposed to the policy
 ##
 
-df_year <- df_analysis[, .(year, location, post_treat, pop_tenants, total_population)]
+df_year <- df[, .(year, location, post_treat, pop_tenants, total_population)]
 
 df_year[, total_pop := sum(.SD$total_population), by = "year"]
 df_year <- df_year[post_treat == 1,]
@@ -622,7 +629,7 @@ files <- list.files(sfd_files)[list.files(sfd_files) %like% ".geojson" &
                                !(list.files(sfd_files) %like% "crime")]
 files <- paste0(sfd_files, files)
 
-cfh_cities <- c("avondale", "chandler", "mesa")
+cfh_cities <- c("avondale", "chandler", "mesa", "scottsdale")
 
 compare_vars <- c("evict_rate", "renter_black", "renter_asian", "renter_white_alone",
                   "renter_native_american", "renter_hispanic_latin", 
@@ -713,7 +720,7 @@ sfd_summary <- rbindlist(lapply(cfh_cities, calc_sfd_summaries))
 sfd_summary <- sfd_summary[, .(City, variable, Control, Treated, Difference)]
 
 sfd_summary[, City := mapvalues(City, unique(sfd_summary$City),
-                                c("Avondale", "Chandler", "Mesa"))]
+                                c("Avondale", "Chandler", "Mesa", "Scottsdale"))]
 
 write.csv(sfd_summary, "./figs/city_summaries_2023.csv", row.names = F)
 

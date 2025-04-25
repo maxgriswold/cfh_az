@@ -99,7 +99,7 @@ run_sfd_models <- function(city_name, dep, ind, model_name, model_type = "sfd"){
 
 # Model settings
 
-cfh_cities    <- c("avondale", "chandler", "mesa")
+cfh_cities    <- c("avondale", "chandler", "mesa", "scottsdale")
 dep_var       <- "evict_rate"
 adjusted_spec <- c("median_income_10k", "renter_white_alone", "renter_black", "renter_asian",
                    "renter_hispanic_latin", "percent_poverty_150")

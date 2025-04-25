@@ -524,7 +524,7 @@ code_coordinates <- function(df, added_text = ""){
 # Also load CFH property locations within cities of Maricopa county.
 # Geocode these locations.
 
-keep_cities <- c("avondale", "chandler", "mesa")
+keep_cities <- c("avondale", "chandler", "mesa", "scottsdale")
 
 if (geocode){
   
